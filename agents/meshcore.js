@@ -2003,19 +2003,33 @@ function handleServerCommand(data) {
                 var setupCmdChild = function (child, cmdData) {
                     // A failed spawn never fires 'exit': without this handler the agent stays "already busy" forever.
                     child.on('error', function (e) {
-                        try { child.stdout.removeAllListeners('data'); child.stderr.removeAllListeners('data'); } catch (ex) { }
+                        try { child.stdout.removeAllListeners('data'); child.stderr.removeAllListeners('data'); } catch (ex) { } 
+                        child.timeoutReleased = true;
+                        if (child.timeoutTimer != null) { clearTimeout(child.timeoutTimer); }
                         var msg = "Run commands failed: " + (((e != null) && (e.code != null)) ? e.code : 'spawn error');
                         sendConsoleText(msg);
                         if ((cmdData.reply === true) && (cmdData.responseid != null)) { try { mesh.SendCommand({ action: 'msg', type: 'runcommands', result: msg, sessionid: cmdData.sessionid, responseid: cmdData.responseid }); } catch (ex) { } }
                         if (mesh.cmdchild === child) { delete mesh.cmdchild; }
                     });
+                    // Capture output on the child so the timeout path can reply with what was produced so far.
+                    child.replyData = '';
+                    try {
+                        child.stdout.on('data', function (c) { child.replyData += c.toString(); });
+                        child.stderr.on('data', function (c) { child.replyData += c.toString(); });
+                    } catch (ex) { }
                     if ((typeof cmdData.timeout == 'number') && (cmdData.timeout > 0)) {
                         child.timeoutTimer = setTimeout(function () {
                             if (mesh.cmdchild === child) {
                                 child.timedout = true;
+                                child.timeoutReleased = true;
                                 sendConsoleText("Run commands timed out after " + cmdData.timeout + " second(s), stopping.");
-                                try { child.kill(); } catch (ex) { }
+                                try { child.kill(); } catch (ex) { } 
                                 setTimeout(function () { try { if (child.exitCode === null) { child.kill('SIGKILL'); } } catch (ex) { } }, 2000); // Escalate if the process ignores SIGTERM.
+                                // Release the busy lock and reply HERE, not in the 'exit' handler: this embedded runtime may
+                                // never emit 'exit' for a kill()-terminated child, which left the agent "already busy" forever.
+                                delete mesh.cmdchild;
+                                if ((cmdData.reply === true) && (cmdData.responseid != null)) {
+                                    try { mesh.SendCommand({ action: 'msg', type: 'runcommands', result: child.replyData + '\r\n[Run commands timed out after ' + cmdData.timeout + ' second(s)]', sessionid: cmdData.sessionid, responseid: cmdData.responseid }); } catch (ex) { } }
                             }
                         }, cmdData.timeout * 1000);
                     }
@@ -2030,17 +2044,17 @@ function handleServerCommand(data) {
                         mesh.cmdchild.stdout.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
                         mesh.cmdchild.stderr.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
                         mesh.cmdchild.stdin.write(data.cmds + '\r\nexit\r\n');
+                        var cmdchild = mesh.cmdchild;
                         mesh.cmdchild.on('exit', function () {
-                            if (mesh.cmdchild != null) {
-                                if (mesh.cmdchild.timeoutTimer != null) { clearTimeout(mesh.cmdchild.timeoutTimer); }
-                                if (mesh.cmdchild.timedout === true) { replydata += ('\r\n[Run commands timed out after ' + data.timeout + ' second(s)]'); }
-                            }
+                            if (cmdchild.timeoutTimer != null) { clearTimeout(cmdchild.timeoutTimer); }
+                            if (cmdchild.timeoutReleased === true) { return; } // The timeout path already released the lock and replied.
+                            if (cmdchild.timedout === true) { replydata += ('\r\n[Run commands timed out after ' + data.timeout + ' second(s)]'); }
                             if (data.reply) {
                                 mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid });
                             } else {
-                                sendConsoleText(((mesh.cmdchild != null) && (mesh.cmdchild.timedout === true)) ? "Run commands timed out." : "Run commands completed.");
+                                sendConsoleText((cmdchild.timedout === true) ? "Run commands timed out." : "Run commands completed.");
                             }
-                            delete mesh.cmdchild;
+                            if (mesh.cmdchild === cmdchild) { delete mesh.cmdchild; }
                         });
                     } else if (data.type == 2) {
                         // Windows Powershell
@@ -2050,17 +2064,17 @@ function handleServerCommand(data) {
                         mesh.cmdchild.stdout.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
                         mesh.cmdchild.stderr.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
                         mesh.cmdchild.stdin.write(data.cmds + '\r\nexit\r\n');
+                        var cmdchild = mesh.cmdchild;
                         mesh.cmdchild.on('exit', function () {
-                            if (mesh.cmdchild != null) {
-                                if (mesh.cmdchild.timeoutTimer != null) { clearTimeout(mesh.cmdchild.timeoutTimer); }
-                                if (mesh.cmdchild.timedout === true) { replydata += ('\r\n[Run commands timed out after ' + data.timeout + ' second(s)]'); }
-                            }
+                            if (cmdchild.timeoutTimer != null) { clearTimeout(cmdchild.timeoutTimer); }
+                            if (cmdchild.timeoutReleased === true) { return; } // The timeout path already released the lock and replied.
+                            if (cmdchild.timedout === true) { replydata += ('\r\n[Run commands timed out after ' + data.timeout + ' second(s)]'); }
                             if (data.reply) {
                                 mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid });
                             } else {
-                                sendConsoleText(((mesh.cmdchild != null) && (mesh.cmdchild.timedout === true)) ? "Run commands timed out." : "Run commands completed.");
+                                sendConsoleText((cmdchild.timedout === true) ? "Run commands timed out." : "Run commands completed.");
                             }
-                            delete mesh.cmdchild;
+                            if (mesh.cmdchild === cmdchild) { delete mesh.cmdchild; }
                         });
                     }
                 } else if (data.type == 3) {
@@ -2071,17 +2085,17 @@ function handleServerCommand(data) {
                     mesh.cmdchild.stdout.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
                     mesh.cmdchild.stderr.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
                     mesh.cmdchild.stdin.write(data.cmds.split('\r').join('') + '\nexit\n');
+                    var cmdchild = mesh.cmdchild;
                     mesh.cmdchild.on('exit', function () {
-                        if (mesh.cmdchild != null) {
-                            if (mesh.cmdchild.timeoutTimer != null) { clearTimeout(mesh.cmdchild.timeoutTimer); }
-                            if (mesh.cmdchild.timedout === true) { replydata += ('\r\n[Run commands timed out after ' + data.timeout + ' second(s)]'); }
-                        }
+                        if (cmdchild.timeoutTimer != null) { clearTimeout(cmdchild.timeoutTimer); }
+                        if (cmdchild.timeoutReleased === true) { return; } // The timeout path already released the lock and replied.
+                        if (cmdchild.timedout === true) { replydata += ('\r\n[Run commands timed out after ' + data.timeout + ' second(s)]'); }
                         if (data.reply) {
                             mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid });
                         } else {
-                            sendConsoleText(((mesh.cmdchild != null) && (mesh.cmdchild.timedout === true)) ? "Run commands timed out." : "Run commands completed.");
+                            sendConsoleText((cmdchild.timedout === true) ? "Run commands timed out." : "Run commands completed.");
                         }
-                        delete mesh.cmdchild;
+                        if (mesh.cmdchild === cmdchild) { delete mesh.cmdchild; }
                     });
                 }
                 break;
