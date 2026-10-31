@@ -1982,6 +1982,7 @@ function handleServerCommand(data) {
 
                 // data.runAsUser: 0=Agent,1=UserOrAgent,2=UserOnly
                 var options = {};
+                if (process.platform != 'win32') { options.detached = true; } // Make the shell a process group leader: the group kill in stopCmdChildTree (-pid) then stops its whole tree. A non-leader shell leaves descendants orphaned (verified live: sleep 30 outlived the timeout).
                 if (data.runAsUser > 0) {
                     try { options.uid = require('user-sessions').consoleUid(); } catch (ex) { }
                     options.type = require('child_process').SpawnTypes.TERM;
