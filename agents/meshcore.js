@@ -1999,6 +1999,13 @@ function handleServerCommand(data) {
                         break;
                     }
                 }
+                // Kill the shell and its descendants: a plain child.kill() only stops the shell and leaves its children running as orphans.
+                var stopCmdChildTree = function (child, sig) {
+                    var killed = false;
+                    try { if (child != null) { child.kill(sig); killed = true; } } catch (ex) { }
+                    try { if ((child != null) && (typeof child.pid == 'number') && (child.pid > 0)) { process.kill(-child.pid, sig); killed = true; } } catch (ex) { } // Group kill: takes the whole tree when the child leads a process group.
+                    return killed;
+                }
                 // Shared child setup: always release the busy lock on spawn errors, and optionally stop non-terminating commands (timeout in seconds).
                 var setupCmdChild = function (child, cmdData) {
                     // A failed spawn never fires 'exit': without this handler the agent stays "already busy" forever.
@@ -2023,8 +2030,9 @@ function handleServerCommand(data) {
                                 child.timedout = true;
                                 child.timeoutReleased = true;
                                 sendConsoleText("Run commands timed out after " + cmdData.timeout + " second(s), stopping.");
-                                try { child.kill(); } catch (ex) { } 
-                                setTimeout(function () { try { if (child.exitCode === null) { child.kill('SIGKILL'); } } catch (ex) { } }, 2000); // Escalate if the process ignores SIGTERM.
+                                // Kill the whole tree, not just the shell: sh descendants (tail -f, cmd.exe children) survive child.kill() and linger as orphans.
+                                stopCmdChildTree(child, 'SIGTERM');
+                                setTimeout(function () { stopCmdChildTree(child, 'SIGKILL'); }, 2000); // Escalate if anything ignores SIGTERM.
                                 // Release the busy lock and reply HERE, not in the 'exit' handler: this embedded runtime may
                                 // never emit 'exit' for a kill()-terminated child, which left the agent "already busy" forever.
                                 delete mesh.cmdchild;
