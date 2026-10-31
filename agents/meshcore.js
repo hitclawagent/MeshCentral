@@ -2005,7 +2005,7 @@ function handleServerCommand(data) {
                     child.on('error', function (e) {
                         try { child.stdout.removeAllListeners('data'); child.stderr.removeAllListeners('data'); } catch (ex) { } 
                         child.timeoutReleased = true;
-                        if (child.timeoutTimer != null) { clearTimeout(child.timeoutTimer); }
+                        try { if (child.timeoutTimer != null) { clearTimeout(child.timeoutTimer); } } catch (ex) { }
                         var msg = "Run commands failed: " + (((e != null) && (e.code != null)) ? e.code : 'spawn error');
                         sendConsoleText(msg);
                         if ((cmdData.reply === true) && (cmdData.responseid != null)) { try { mesh.SendCommand({ action: 'msg', type: 'runcommands', result: msg, sessionid: cmdData.sessionid, responseid: cmdData.responseid }); } catch (ex) { } }
@@ -2046,7 +2046,7 @@ function handleServerCommand(data) {
                         mesh.cmdchild.stdin.write(data.cmds + '\r\nexit\r\n');
                         var cmdchild = mesh.cmdchild;
                         mesh.cmdchild.on('exit', function () {
-                            if (cmdchild.timeoutTimer != null) { clearTimeout(cmdchild.timeoutTimer); }
+                            try { if (cmdchild.timeoutTimer != null) { clearTimeout(cmdchild.timeoutTimer); } } catch (ex) { } // The MeshAgent runtime throws on invalid/already-fired timers, Node does not.
                             if (cmdchild.timeoutReleased === true) { return; } // The timeout path already released the lock and replied.
                             if (cmdchild.timedout === true) { replydata += ('\r\n[Run commands timed out after ' + data.timeout + ' second(s)]'); }
                             if (data.reply) {
@@ -2066,7 +2066,7 @@ function handleServerCommand(data) {
                         mesh.cmdchild.stdin.write(data.cmds + '\r\nexit\r\n');
                         var cmdchild = mesh.cmdchild;
                         mesh.cmdchild.on('exit', function () {
-                            if (cmdchild.timeoutTimer != null) { clearTimeout(cmdchild.timeoutTimer); }
+                            try { if (cmdchild.timeoutTimer != null) { clearTimeout(cmdchild.timeoutTimer); } } catch (ex) { } // The MeshAgent runtime throws on invalid/already-fired timers, Node does not.
                             if (cmdchild.timeoutReleased === true) { return; } // The timeout path already released the lock and replied.
                             if (cmdchild.timedout === true) { replydata += ('\r\n[Run commands timed out after ' + data.timeout + ' second(s)]'); }
                             if (data.reply) {
@@ -2087,7 +2087,7 @@ function handleServerCommand(data) {
                     mesh.cmdchild.stdin.write(data.cmds.split('\r').join('') + '\nexit\n');
                     var cmdchild = mesh.cmdchild;
                     mesh.cmdchild.on('exit', function () {
-                        if (cmdchild.timeoutTimer != null) { clearTimeout(cmdchild.timeoutTimer); }
+                        try { if (cmdchild.timeoutTimer != null) { clearTimeout(cmdchild.timeoutTimer); } } catch (ex) { } // The MeshAgent runtime throws on invalid/already-fired timers, Node does not.
                         if (cmdchild.timeoutReleased === true) { return; } // The timeout path already released the lock and replied.
                         if (cmdchild.timedout === true) { replydata += ('\r\n[Run commands timed out after ' + data.timeout + ' second(s)]'); }
                         if (data.reply) {
