@@ -4504,29 +4504,37 @@
             try { type = parseInt(Q('d2cmdtype').value); } catch (ex) { }
             if (options.selectedFile == null) { putstore('runopt', JSON.stringify({ type: type, runAs: parseInt(Q('d2cmduser').value), source: parseInt(Q('d2cmdsource').value), cmd: encodeURIComponent(Q('d2runcmd').value) })); } // Save run options
             var cmd = { action: 'runcommands', nodeids: options.nodeids, type: type, runAsUser: parseInt(Q('d2cmduser').value) };
+            // Capture every dialog value BEFORE d2runBegin(): it replaces the dialog content with the
+            // pending modal, so any Q() read after it returns null and the runcommands message is never
+            // sent (found live by the E2E battery: the dialog waited forever on the mobile template).
+            var d2source = 0, d2text = '', d2file = null, d2serverfiles = null, d2serverpath = null, d2timeout = null;
+            try { d2source = parseInt(Q('d2cmdsource').value); } catch (ex) { }
+            try { d2text = Q('d2runcmd').value; } catch (ex) { }
+            try { if ((Q('d2runfileex') != null) && (Q('d2runfileex').files.length == 1)) { d2file = Q('d2runfileex').files[0]; } } catch (ex) { }
+            try { if (d2source == 2) { d2serverfiles = d3getFileSel(); d2serverpath = d3filetreelocation.join('/'); } } catch (ex) { }
+            try { d2timeout = parseInt(Q('d2cmdtimeout').value); } catch (ex) { }
             cmd.reply = true;
+            cmd.timeout = ((d2timeout > 0) ? d2timeout : null);
+            if ((options.selectedFile == null) && (d2source == 2) && ((d2serverfiles == null) || (d2serverfiles.length != 1))) { return; } // Never open a pending dialog for an invalid server-file selection.
             cmd.responseid = d2runBegin(options.nodeids);
-            try { var d2timeout = parseInt(Q('d2cmdtimeout').value); cmd.timeout = ((d2timeout > 0) ? d2timeout : null); } catch (ex) { }
             if (options.selectedFile) {
                 // Drag & drop file
                 var reader = new FileReader();
                 reader.onload = function (e) { cmd.cmds = e.target.result; meshserver.send(cmd); if (options.func) { options.func(); } }
                 reader.readAsText(options.selectedFile);
-            } else if (Q('d2cmdsource').value == 0) {
+            } else if (d2source == 0) {
                 // From text box
-                cmd.cmds = Q('d2runcmd').value;
+                cmd.cmds = d2text;
                 meshserver.send(cmd);
                 if (options.func) { options.func(); }
-            } else if (Q('d2cmdsource').value == 1) {
+            } else if (d2source == 1) {
                 // From file
                 var reader = new FileReader();
                 reader.onload = function (e) { cmd.cmds = e.target.result; meshserver.send(cmd); if (options.func) { options.func(); } }
-                reader.readAsText(Q('d2runfileex').files[0]);
-            } else if (Q('d2cmdsource').value == 2) {
+                reader.readAsText(d2file);
+            } else if (d2source == 2) {
                 // From server file
-                var files = d3getFileSel();
-                if (files.length != 1) return;
-                cmd.cmdpath = d3filetreelocation.join('/') + '/' + files[0];
+                cmd.cmdpath = d2serverpath + '/' + d2serverfiles[0];
                 meshserver.send(cmd);
                 if (options.func) { options.func(); }
             }
