@@ -3750,6 +3750,16 @@
                     mainUpdate(4);
 					break;
                 }
+                case 'runcommands': {
+                    // Immediate server-side replies ("Agent not connected", "Invalid nodeid", ...) carry no nodeid:
+                    // attribute them to the first pending device without a result yet, so the modal never waits forever.
+                    if ((message.responseid != null) && (d2runPending[message.responseid] != null) && (message.nodeid == null)) {
+                        var d2pending = d2runPending[message.responseid];
+                        for (var i in d2pending.nodes) { if (d2pending.results[d2pending.nodes[i]] == null) { message.nodeid = d2pending.nodes[i]; break; } }
+                    }
+                    d2runResultReceive(message);
+                    break;
+                }
                 case 'msg': {
                     // Check if this is a message from a node
                     if (message.nodeid != null) {
