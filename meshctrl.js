@@ -963,6 +963,7 @@ if (args['_'].length == 0) {
                         console.log("  --runasuser            - Attempt to run the command as logged in user.");
                         console.log("  --runasuseronly        - Only run the command as the logged in user.");
                         console.log("  --reply                - Return with the output from running the command.");
+                        console.log("  --timeout [seconds]    - Stop the command if still running after [seconds] (agent-side).");
                         break;
                     }
                     case 'shell': {
@@ -1811,7 +1812,9 @@ function serverConnect() {
                 if (args.runasuser) { runAsUser = 1; } else if (args.runasuseronly) { runAsUser = 2; }
                 var reply = false;
                 if (args.reply) { reply = true; }
-                ws.send(JSON.stringify({ action: 'runcommands', nodeids: [args.id], type: ((args.powershell) ? 2 : 0), cmds: args.run, responseid: RUNCOMMAND_RESPONSE_ID, runAsUser: runAsUser, reply: reply }));
+                var timeout = null;
+                if (args.timeout != null) { timeout = parseFloat(args.timeout); if ((isNaN(timeout)) || (timeout < 1)) { console.log("Invalid timeout."); process.exit(1); return; } }
+                ws.send(JSON.stringify({ action: 'runcommands', nodeids: [args.id], type: ((args.powershell) ? 2 : 0), cmds: args.run, responseid: RUNCOMMAND_RESPONSE_ID, runAsUser: runAsUser, reply: reply, timeout: timeout }));
                 break;
             }
             case 'shell':

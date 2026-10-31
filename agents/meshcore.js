@@ -1972,7 +1972,12 @@ function handleServerCommand(data) {
                 break;
             }
             case 'runcommands': {
-                if (mesh.cmdchild != null) { sendConsoleText("Run commands can't execute, already busy."); break; }
+                if (mesh.cmdchild != null) {
+                    // Also notify the requester: a remote caller waiting on responseid would otherwise hang until its own timeout (or forever).
+                    sendConsoleText("Run commands can't execute, already busy.");
+                    if (data.responseid != null) { try { mesh.SendCommand({ action: 'msg', type: 'runcommands', result: "Run commands can't execute, already busy.", sessionid: data.sessionid, responseid: data.responseid }); } catch (ex) { } }
+                    break;
+                }
                 if (!data.reply) sendConsoleText("Run commands (" + data.runAsUser + "): " + data.cmds);
 
                 // data.runAsUser: 0=Agent,1=UserOrAgent,2=UserOnly
@@ -1982,8 +1987,38 @@ function handleServerCommand(data) {
                     options.type = require('child_process').SpawnTypes.TERM;
                 }
                 if (data.runAsUser == 2) {
-                    if (options.uid == null) break;
-                    if (((require('user-sessions').minUid != null) && (options.uid < require('user-sessions').minUid()))) break; // This command can only run as user.
+                    // Reply to the requester instead of failing silently: without a user session this looks exactly like a hung command.
+                    if (options.uid == null) {
+                        sendConsoleText("Run commands can't execute, no user session is available.");
+                        if (data.responseid != null) { try { mesh.SendCommand({ action: 'msg', type: 'runcommands', result: "Run commands can't execute, no user session is available.", sessionid: data.sessionid, responseid: data.responseid }); } catch (ex) { } }
+                        break;
+                    }
+                    if (((require('user-sessions').minUid != null) && (options.uid < require('user-sessions').minUid()))) { // This command can only run as user.
+                        sendConsoleText("Run commands can't execute, no suitable user session is available.");
+                        if (data.responseid != null) { try { mesh.SendCommand({ action: 'msg', type: 'runcommands', result: "Run commands can't execute, no suitable user session is available.", sessionid: data.sessionid, responseid: data.responseid }); } catch (ex) { } }
+                        break;
+                    }
+                }
+                // Shared child setup: always release the busy lock on spawn errors, and optionally stop non-terminating commands (timeout in seconds).
+                var setupCmdChild = function (child, cmdData) {
+                    // A failed spawn never fires 'exit': without this handler the agent stays "already busy" forever.
+                    child.on('error', function (e) {
+                        try { child.stdout.removeAllListeners('data'); child.stderr.removeAllListeners('data'); } catch (ex) { }
+                        var msg = "Run commands failed: " + (((e != null) && (e.code != null)) ? e.code : 'spawn error');
+                        sendConsoleText(msg);
+                        if ((cmdData.reply === true) && (cmdData.responseid != null)) { try { mesh.SendCommand({ action: 'msg', type: 'runcommands', result: msg, sessionid: cmdData.sessionid, responseid: cmdData.responseid }); } catch (ex) { } }
+                        if (mesh.cmdchild === child) { delete mesh.cmdchild; }
+                    });
+                    if ((typeof cmdData.timeout == 'number') && (cmdData.timeout > 0)) {
+                        child.timeoutTimer = setTimeout(function () {
+                            if (mesh.cmdchild === child) {
+                                child.timedout = true;
+                                sendConsoleText("Run commands timed out after " + cmdData.timeout + " second(s), stopping.");
+                                try { child.kill(); } catch (ex) { }
+                                setTimeout(function () { try { if (child.exitCode === null) { child.kill('SIGKILL'); } } catch (ex) { } }, 2000); // Escalate if the process ignores SIGTERM.
+                            }
+                        }, cmdData.timeout * 1000);
+                    }
                 }
                 var replydata = "";
                 if (process.platform == 'win32') {
@@ -1991,14 +2026,19 @@ function handleServerCommand(data) {
                         // Windows command shell
                         mesh.cmdchild = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd'], options);
                         mesh.cmdchild.descriptorMetadata = 'UserCommandsShell';
+                        setupCmdChild(mesh.cmdchild, data);
                         mesh.cmdchild.stdout.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
                         mesh.cmdchild.stderr.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
                         mesh.cmdchild.stdin.write(data.cmds + '\r\nexit\r\n');
                         mesh.cmdchild.on('exit', function () {
+                            if (mesh.cmdchild != null) {
+                                if (mesh.cmdchild.timeoutTimer != null) { clearTimeout(mesh.cmdchild.timeoutTimer); }
+                                if (mesh.cmdchild.timedout === true) { replydata += ('\r\n[Run commands timed out after ' + data.timeout + ' second(s)]'); }
+                            }
                             if (data.reply) {
                                 mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid });
                             } else {
-                                sendConsoleText("Run commands completed.");
+                                sendConsoleText(((mesh.cmdchild != null) && (mesh.cmdchild.timedout === true)) ? "Run commands timed out." : "Run commands completed.");
                             }
                             delete mesh.cmdchild;
                         });
@@ -2006,14 +2046,19 @@ function handleServerCommand(data) {
                         // Windows Powershell
                         mesh.cmdchild = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], options);
                         mesh.cmdchild.descriptorMetadata = 'UserCommandsPowerShell';
+                        setupCmdChild(mesh.cmdchild, data);
                         mesh.cmdchild.stdout.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
                         mesh.cmdchild.stderr.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
                         mesh.cmdchild.stdin.write(data.cmds + '\r\nexit\r\n');
                         mesh.cmdchild.on('exit', function () {
+                            if (mesh.cmdchild != null) {
+                                if (mesh.cmdchild.timeoutTimer != null) { clearTimeout(mesh.cmdchild.timeoutTimer); }
+                                if (mesh.cmdchild.timedout === true) { replydata += ('\r\n[Run commands timed out after ' + data.timeout + ' second(s)]'); }
+                            }
                             if (data.reply) {
                                 mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid });
                             } else {
-                                sendConsoleText("Run commands completed.");
+                                sendConsoleText(((mesh.cmdchild != null) && (mesh.cmdchild.timedout === true)) ? "Run commands timed out." : "Run commands completed.");
                             }
                             delete mesh.cmdchild;
                         });
@@ -2022,14 +2067,19 @@ function handleServerCommand(data) {
                     // Linux shell
                     mesh.cmdchild = require('child_process').execFile('/bin/sh', ['sh'], options);
                     mesh.cmdchild.descriptorMetadata = 'UserCommandsShell';
+                    setupCmdChild(mesh.cmdchild, data);
                     mesh.cmdchild.stdout.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
                     mesh.cmdchild.stderr.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
                     mesh.cmdchild.stdin.write(data.cmds.split('\r').join('') + '\nexit\n');
                     mesh.cmdchild.on('exit', function () {
+                        if (mesh.cmdchild != null) {
+                            if (mesh.cmdchild.timeoutTimer != null) { clearTimeout(mesh.cmdchild.timeoutTimer); }
+                            if (mesh.cmdchild.timedout === true) { replydata += ('\r\n[Run commands timed out after ' + data.timeout + ' second(s)]'); }
+                        }
                         if (data.reply) {
                             mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid });
                         } else {
-                            sendConsoleText("Run commands completed.");
+                            sendConsoleText(((mesh.cmdchild != null) && (mesh.cmdchild.timedout === true)) ? "Run commands timed out." : "Run commands completed.");
                         }
                         delete mesh.cmdchild;
                     });

@@ -3278,6 +3278,9 @@ module.exports.CreateMeshUser = function (parent, db, ws, req, args, domain, use
 
                                     if (typeof command.reply != 'boolean') command.reply = false;
                                     if (typeof command.responseid != 'string') command.responseid = null;
+                                    // Optional per-run timeout in seconds (UI/API/CLI): sanitized here so a bad value can not reach the agent.
+                                    if (typeof command.timeout == 'string') { const t = parseFloat(command.timeout); command.timeout = ((isFinite(t)) && (t >= 1) && (t <= 86400)) ? t : null; }
+                                    if (typeof command.timeout != 'number') { command.timeout = null; }
                                     var msgid = 24; // "Running commands"
                                     if (command.type == 1) { msgid = 99; } // "Running commands as user"
                                     if (command.type == 2) { msgid = 100; } // "Running commands as user if possible"
@@ -3294,7 +3297,7 @@ module.exports.CreateMeshUser = function (parent, db, ws, req, args, domain, use
                                         else if (command.type === 0) { command.type = 3; commandsOk = true; } // Set the default type of this agent
                                     }
                                     if (commandsOk == true) {
-                                        var theCommand = { action: 'runcommands', type: command.type, cmds: command.cmds, runAsUser: command.runAsUser, reply: command.reply, responseid: command.responseid, sessionid: ws.sessionId };
+                                        var theCommand = { action: 'runcommands', type: command.type, cmds: command.cmds, runAsUser: command.runAsUser, reply: command.reply, responseid: command.responseid, timeout: command.timeout, sessionid: ws.sessionId };
                                         var agent = parent.wsagents[node._id];
                                         if ((agent != null) && (agent.authenticated == 2) && (agent.agentInfo != null)) {
                                             // Send the commands to the agent
