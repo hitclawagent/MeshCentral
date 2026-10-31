@@ -2868,6 +2868,16 @@
                     mainUpdate(4);
 					break;
                 }
+                case 'runcommands': {
+                    // Immediate server-side replies ("Agent not connected", "Invalid nodeid", ...) carry no nodeid:
+                    // attribute them to the first pending device without a result yet, so the dialog never waits forever.
+                    if ((message.responseid != null) && (d2runPending[message.responseid] != null) && (message.nodeid == null)) {
+                        var d2pending = d2runPending[message.responseid];
+                        for (var i in d2pending.nodes) { if (d2pending.results[d2pending.nodes[i]] == null) { message.nodeid = d2pending.nodes[i]; break; } }
+                    }
+                    d2runResultReceive(message);
+                    break;
+                }
                 case 'msg': {
                     // Check if this is a message from a node
                     if (message.nodeid != null) {
@@ -2881,7 +2891,8 @@
                                 if (typeof message.memory.percentConsumed == 'number') { memory = message.memory.percentConsumed; }
                                 deviceDetailsStatsData.push([now, cpu, memory]);
                                 deviceDetailsStatsDraw(message);
-                            } else if (message.type === 'console') { p15consoleReceive(nodes[index], message.value, message.source); } // This is a console message.
+                            } else if (message.type === 'runcommands') { d2runResultReceive(message); } // Run commands output sent to this requester.
+                            else if (message.type === 'console') { p15consoleReceive(nodes[index], message.value, message.source); } // This is a console message.
                             else if (message.type === 'notify') { // This is a notification message.
                                 var n = getstore('notifications', 0);
                                 if (((n & 8) == 0) && (message.amtMessage != null)) { break; } // Intel AMT desktop & terminal messages should be ignored.
@@ -6451,6 +6462,7 @@
                     x += '<select id=d2cmdsource onclick=d2runCommandValidate() style=width:100%;margin-bottom:4px><option value=0' + ((runopt.source == 0)?' selected':'') + '>' + "Commands from text box" + '</option><option value=1' + ((runopt.source == 1)?' selected':'') + '>' + "Commands from file" + '</option>';
                     if (userinfo.siteadmin & 8) { x += '<option value=2' + ((runopt.source == 2)?' selected':'') + '>' + "Commands from file on server" + '</option>'; }
                     x += '</select><textarea id=d2runcmd onkeyup=d2runCommandValidate() style=background-color:#fcf3cf;width:100%;height:200px;resize:none;overflow-y:scroll>' + (runopt.cmd ? EscapeHtml(decodeURIComponent(runopt.cmd)) : '') + '</textarea>';
+                    x += '<input id=d2cmdtimeout type=number min=0 max=86400 step=1 placeholder="Timeout in seconds (0 = no timeout)" style=width:100%;margin-bottom:4px />';
                     x += '<div id=d2runfile style=display:none><input id=d2runfileex type=file onchange=d2runCommandValidate() id=d2localFile name=files onchange=d2runCommandValidate() /></div>';
                     if (userinfo.siteadmin & 8) { x += '<div id=d2runsfile style=display:none><div id=d2serveraction valign=bottom><input type=button id=p2FolderUp disabled="disabled" onclick=d3folderup() value="Up" />&nbsp;<span id=p2CurrentFolder></span></div><div id=d2serverfiles></div></div>'; }
                 }
@@ -6484,6 +6496,9 @@
             try { type = parseInt(Q('d2cmdtype').value); } catch (ex) { }
             if (options.selectedFile == null) { putstore('runopt', JSON.stringify({ type: type, runAs: parseInt(Q('d2cmduser').value), source: parseInt(Q('d2cmdsource').value), cmd: encodeURIComponent(Q('d2runcmd').value) })); } // Save run options
             var cmd = { action: 'runcommands', nodeids: options.nodeids, type: type, runAsUser: parseInt(Q('d2cmduser').value) };
+            cmd.reply = true;
+            cmd.responseid = d2runBegin(options.nodeids);
+            try { var d2timeout = parseInt(Q('d2cmdtimeout').value); cmd.timeout = ((d2timeout > 0) ? d2timeout : null); } catch (ex) { }
             if (options.selectedFile) {
                 // Drag & drop file
                 var reader = new FileReader();
@@ -8982,6 +8997,7 @@
                     }
                     x += '<select id=d2cmduser style=width:100%;margin-bottom:4px><option value=0>' + "Run as agent" + '</option><option value=1>' + "Run as user, agent if no user" + '</option><option value=2>' + "Must run as user" + '</option></select>';
                     x += '<textarea id=d2runcmd style=background-color:#fcf3cf;width:100%;height:200px;resize:none;overflow-y:scroll></textarea>';
+                    x += '<input id=d2cmdtimeout type=number min=0 max=86400 step=1 placeholder="Timeout in seconds (0 = no timeout)" style=width:100%;margin-bottom:4px />';
                     setDialogMode(2, "Run Commands", 3, deviceRunCmdsFunctionEx, x);
                     Q('d2runcmd').focus();
                     //QE('idx_dlgOkButton', true);
@@ -9029,10 +9045,46 @@
             }
         }
 
+        // --- Run Commands reply plumbing (fix/runcommands-freeze): show command output in the dialog instead of only in the agent console ---
+        var d2runPending = {}; // responseid -> { nodes: [...], results: { nodeid: text } }
+        function d2runResponseId() {
+            try { if ((typeof crypto == 'object') && (typeof crypto.randomUUID == 'function')) { return crypto.randomUUID(); } } catch (ex) { }
+            return 'run-' + Date.now() + '-' + Math.floor(Math.random() * 1000000000);
+        }
+        function d2runNodeName(nodeid) {
+            try { var n = getNodeFromId(nodeid); if ((n != null) && (n.name != null)) { return n.name; } } catch (ex) { }
+            return nodeid;
+        }
+        function d2runResultsHtml(pending) {
+            var x = '';
+            for (var i in pending.nodes) {
+                var r = pending.results[pending.nodes[i]];
+                x += '<div style="margin-bottom:4px"><b>' + EscapeHtml(d2runNodeName(pending.nodes[i])) + '</b></div>';
+                x += '<div style="font-family:Consolas,monospace;border:1px solid #ccc;border-radius:4px;margin-bottom:8px;padding:6px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow-y:auto">' + ((r == null) ? 'Waiting...' : EscapeHtml(String(r))) + '</div>';
+            }
+            var done = true;
+            for (var i in pending.nodes) { if (pending.results[pending.nodes[i]] == null) { done = false; } }
+            x += '<div>' + (done ? "Completed." : "Waiting for remaining devices...") + '</div>';
+            return x;
+        }
+        function d2runBegin(nodeids) {
+            var responseid = d2runResponseId();
+            d2runPending[responseid] = { nodes: nodeids.slice(0), results: {} };
+            setDialogMode(2, "Run Commands", 10, function () { delete d2runPending[responseid]; }, d2runResultsHtml(d2runPending[responseid])); // b=10: no OK button, Cancel/X close and clean up pending.
+            return responseid;
+        }
+        function d2runResultReceive(message) {
+            if ((message.responseid == null) || (d2runPending[message.responseid] == null)) { return; }
+            var pending = d2runPending[message.responseid];
+            if (message.nodeid != null) { pending.results[message.nodeid] = message.result; }
+            QH('id_dialogtitle', "Run Commands");
+            QH('id_dialogOptions', d2runResultsHtml(pending));
+        }
         function deviceRunCmdsFunctionEx() {
             var type = 3;
             try { type = parseInt(Q('d2cmdtype').value); } catch (ex) { }
-            meshserver.send({ action: 'runcommands', nodeids: [ currentNode._id ], type: type, cmds: Q('d2runcmd').value, runAsUser: parseInt(Q('d2cmduser').value) });
+            var d2timeout = null; try { d2timeout = parseInt(Q('d2cmdtimeout').value); if (!(d2timeout > 0)) { d2timeout = null; } } catch (ex) { }
+            meshserver.send({ action: 'runcommands', nodeids: [ currentNode._id ], type: type, cmds: Q('d2runcmd').value, runAsUser: parseInt(Q('d2cmduser').value), reply: true, responseid: d2runBegin([currentNode._id]), timeout: d2timeout });
         }
 
         // Called when MeshCommander needs new credentials or updated credentials.
