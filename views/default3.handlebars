@@ -7599,6 +7599,7 @@
                 setModalContent('xxAddAgent', "Run Commands", x);
                 showModal('xxAddAgentModal', 'idx_dlgOkButton', function () {
                     d2groupActionFunctionRunCommands(3, options);
+                    return false; // Keep the modal open: the sender opens the pending/results modal in it.
                 });
                 if (options.selectedFile == null) {
                     Q('d2runcmd').focus();
@@ -10297,7 +10298,7 @@
                     x += '<textarea id=d2runcmd style=width:100%;height:200px;resize:none;overflow-y:scroll></textarea>';
                     x += '<input id=d2cmdtimeout type=number min=0 max=86400 step=1 placeholder="Timeout in seconds (0 = no timeout)" style=width:100%;margin-bottom:4px class=form-control />';
                     setModalContent('xxAddAgent', "Run Commands", x);
-                    showModal('xxAddAgentModal', 'idx_dlgOkButton', () => deviceRunCmdsFunctionEx());
+                    showModal('xxAddAgentModal', 'idx_dlgOkButton', () => { deviceRunCmdsFunctionEx(); return false; }); // return false: keep the modal open for the pending/results modal.
                     Q('d2runcmd').focus();
                     //QE('idx_dlgOkButton', true);
                 }
