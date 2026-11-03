@@ -1,13 +1,15 @@
 /**
- * MeshCentral Package Manager plugin ("pkgmanager") — v0.5.0.
+ * MeshCentral Package Manager plugin ("pkgmanager") — v0.7.1.
  *
  * Design: the catalog lives server-side (catalog.json next to this file).
  * The plugin pages are TABS IN THE TOP GRAY BAR (their own
  * #pkgmanagerMenuSpan row next to #MainSubMenuSpan — the span that renders
  * the per-device General/Desktop/Terminal/Files tabs — with the same
  * topbar_td style3x classes; the active tab carries the same fullselect
- * class go() toggles on the core tabs; the row shows while a plugin page is
- * open and hides on navigation):
+ * class go() toggles on the core tabs). The row is ALWAYS visible as the
+ * plugin top menu (v0.7.1): it is hidden ONLY while a device sub-view owns
+ * the gray bar (x 9..19, the General/Desktop/... row), so the three
+ * entries are discoverable right after login):
  *   - "Installazione pacchetti" (everyone) -> the existing install page:
  *     package table + target machine checkboxes on the right; the list
  *     auto-filters by the OSes of the selected machines; installs run on
@@ -43,7 +45,7 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '0.7.0';
+    obj.version = '0.7.1';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -75,7 +77,7 @@ module.exports.pkgmanager = function (parent) {
             var b = document.createElement('div');
             b.id = 'LeftMenuPackages';
             b.className = 'lbbutton';
-            b.title = 'Gestione pacchetti';
+            b.title = 'Installazione pacchetti';
             b.setAttribute('tabindex', '0');
             b.setAttribute('onmouseup', 'pluginHandler.pkgmanager.pkgSidebarOpen()');
             // Icon sized to match the other sidebar entries (.lbtg is 62x62).
@@ -95,7 +97,7 @@ module.exports.pkgmanager = function (parent) {
             // of #MainSubMenuSpan, shown while a plugin page is open and hidden
             // by goPageStart on every go(). "Gestione pacchetti" starts hidden
             // and is shown by pkgTabSetActive() once userinfo is known (admins).
-            var sub = document.getElementById('MainSubMenuSpan');
+            var sub = document.getElementById('MainSubMenuSpan') || document.getElementById('MainMenuSpan');
             if ((sub != null) && (sub.parentNode != null)) {
                 var span = document.createElement('div');
                 span.id = 'pkgmanagerMenuSpan';
@@ -107,8 +109,14 @@ module.exports.pkgmanager = function (parent) {
                     + '<td class="topbar_td_end style3">&nbsp;</td>'
                     + '</tr></table>';
                 sub.parentNode.insertBefore(span, sub.nextSibling);
+            } else {
+                var tb2 = document.getElementById('topbar');
+                if (tb2 != null) { tb2.appendChild(span); }
             }
-            console.log('pkgmanager: sidebar entry + top bar tabs injected');
+            // The tab row is the plugin TOP MENU: visible right away (v0.7.1),
+            // not only after a plugin page is opened.
+            pluginHandler.pkgmanager.pkgTabSetActive(null, false);
+            console.log('pkgmanager: sidebar entry + top bar tabs injected (row always visible)');
         } catch (e) { console.log('pkgmanager sidebar inject failed: ' + e); }
     };
 
@@ -119,7 +127,7 @@ module.exports.pkgmanager = function (parent) {
     // pacchetti" visible to full site admins only (userinfo.siteadmin), and
     // reserve the submenu row height on column_l exactly like go() does
     // (room4submenu) so the page does not slide under the bar.
-    obj.pkgTabSetActive = function (which) {
+    obj.pkgTabSetActive = function (which, hideRow) {
         try {
             var span = document.getElementById('pkgmanagerMenuSpan');
             if (span == null) return;
@@ -129,18 +137,18 @@ module.exports.pkgmanager = function (parent) {
             var adm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
             if (t2 != null) { t2.style.display = adm ? '' : 'none'; }
             if (t3 != null) { t3.style.display = adm ? '' : 'none'; }
+            // The row is the plugin TOP MENU: always visible, except while a
+            // device sub-view owns the gray bar (goPageStart passes hideRow
+            // for x 9..19 — the same bar renders General/Desktop/... there).
+            span.style.display = (hideRow === true) ? 'none' : '';
             var ts = [t1, t2, t3];
-            var act = { install: t1, admin: t2, create: t3 };
-            if (which == null) {
-                span.style.display = 'none';
-                for (var i = 0; i < ts.length; i++) { if (ts[i] != null) { ts[i].classList.remove('fullselect'); } }
-                try { QC('column_l').remove('room4submenu'); } catch (e) { }
-            } else {
-                span.style.display = '';
-                for (var i = 0; i < ts.length; i++) { if (ts[i] != null) { ts[i].classList.remove('fullselect'); } }
-                var a = act[which];
+            for (var i = 0; i < ts.length; i++) { if (ts[i] != null) { ts[i].classList.remove('fullselect'); } }
+            if (which != null) {
+                var a = { install: t1, admin: t2, create: t3 }[which];
                 if (a != null) { a.classList.add('fullselect'); }
                 try { QC('column_l').add('room4submenu'); } catch (e) { }
+            } else {
+                try { QC('column_l').remove('room4submenu'); } catch (e) { }
             }
         } catch (e) { }
     };
@@ -155,7 +163,7 @@ module.exports.pkgmanager = function (parent) {
         try {
             if ((typeof xxdialogMode !== 'undefined') && xxdialogMode) return; // core would no-op this go()
             window.pkgmanagerView = null;
-            pluginHandler.pkgmanager.pkgTabSetActive(null);
+            pluginHandler.pkgmanager.pkgTabSetActive(null, ((typeof x == 'number') && (x >= 9) && (x < 20)));
             var w = document.getElementById('pkgmanagerMainWrap');
             if (w != null) w.style.display = 'none';
             var b = document.getElementById('LeftMenuPackages');
