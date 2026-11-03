@@ -1,0 +1,29 @@
+{
+  "comment": "Packages available for remote install. Per-OS install definition: type 1=Windows cmd.exe, 2=Windows PowerShell, 3=Linux/macOS shell. Runs as the agent; commands needing root must include sudo or the agent must run elevated. timeout = seconds.",
+  "packages": [
+    {
+      "id": "e2e-test",
+      "name": "E2E smoke test",
+      "description": "Harmless smoke test: prints a marker (no system change).",
+      "linux": { "type": 3, "cmd": "echo pkgmanager-e2e-ok && uname -s", "timeout": 30 }
+    },
+    {
+      "id": "htop",
+      "name": "htop",
+      "description": "Interactive process viewer (Debian/Ubuntu/Fedora/Alpine/openSUSE; needs root or sudo).",
+      "linux": { "type": 3, "cmd": "(command -v apt-get >/dev/null && sudo -n apt-get install -y htop) || (command -v dnf >/dev/null && sudo -n dnf -y install htop) || (command -v apk >/dev/null && sudo -n apk add htop) || (command -v zypper >/dev/null && sudo -n zypper --non-interactive install htop) || echo 'no supported package manager or no sudo'", "timeout": 600 }
+    },
+    {
+      "id": "7zip",
+      "name": "7-Zip (Chocolatey)",
+      "description": "File archiver on Windows via Chocolatey (needs choco; run agent elevated).",
+      "windows": { "type": 1, "cmd": "choco install -y --no-progress 7zip", "timeout": 900 }
+    },
+    {
+      "id": "htop-macos",
+      "name": "htop (macOS, Homebrew)",
+      "description": "Interactive process viewer on macOS via Homebrew (needs brew).",
+      "macos": { "type": 3, "cmd": "brew install htop", "timeout": 900 }
+    }
+  ]
+}
