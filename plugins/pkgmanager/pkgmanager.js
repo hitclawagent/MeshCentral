@@ -1,5 +1,5 @@
 /**
- * MeshCentral Package Manager plugin ("pkgmanager") — MVP.
+ * MeshCentral Package Manager plugin ("pkgmanager") — v0.3.0 multi-target.
  *
  * Design: the catalog lives server-side (catalog.json next to this file).
  * The plugin tab lists it and installs a package on the currently selected
@@ -19,13 +19,13 @@
  */
 module.exports.pkgmanager = function (parent) {
     var obj = {};
-    obj.version = '0.2.0';
+    obj.version = '0.3.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgTableHtml', 'pkgTargetOs', 'pkgRunOn', 'pkgInstall', 'goPageStart', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgMsg'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -52,7 +52,8 @@ module.exports.pkgmanager = function (parent) {
             b.title = 'Packages';
             b.setAttribute('tabindex', '0');
             b.setAttribute('onmouseup', 'pluginHandler.pkgmanager.pkgSidebarOpen()');
-            b.innerHTML = '<div style="position:absolute;top:16px;left:0;width:100%;text-align:center;font-size:30px;line-height:1">📦</div>';
+            // Icon sized to match the other sidebar entries (.lbtg is 62x62).
+            b.innerHTML = '<div style="position:absolute;top:8px;left:0;width:100%;text-align:center;font-size:46px;line-height:58px">📦</div>';
             lb.appendChild(b);
             var col = document.getElementById('column_l');
             if (col == null) return;
@@ -93,6 +94,10 @@ module.exports.pkgmanager = function (parent) {
         } catch (e) { console.log('pkgmanager open failed: ' + e); }
     };
 
+    // Page layout: packages on the left, TARGET MACHINES with checkboxes on the
+    // right. The package list filters automatically to the OSes of the selected
+    // machines (a package shows only if it has an install def for EVERY selected
+    // OS, since Install runs on all of them).
     obj.pkgSidebarRenderDevices = function () {
         try {
             var m = document.getElementById('pkgmanagerMain');
@@ -100,40 +105,46 @@ module.exports.pkgmanager = function (parent) {
             var devlist = [];
             try { for (var i in nodes) { if (nodes[i] && nodes[i]._id) devlist.push(nodes[i]); } } catch (e) { }
             var x = '<div style="margin-bottom:8px;font-size:16px"><b>Packages — remote install</b></div>';
-            x += '<div style="margin-bottom:8px">Install on device: <select id="pkgmanagerDevSel">';
+            x += '<div id="pkgmanagerSelSummary" style="margin-bottom:8px;color:#888"></div>';
+            x += '<div style="display:flex;gap:16px;align-items:flex-start">';
+            x += '<div style="flex:1 1 60%;min-width:0"><div style="margin-bottom:4px"><b>Packages</b> <span id="pkgmanagerFilterNote" style="color:#888;font-weight:normal"></span></div><div id="pkgmanagerTableWrap"></div></div>';
+            x += '<div style="flex:0 0 320px;border-left:1px solid #ddd;padding-left:12px">';
+            x += '<div style="margin-bottom:4px"><b>Target machines</b> — <span style="font-size:12px"><a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(true);return false">all</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(false);return false">none</a></span></div>';
+            x += '<div id="pkgmanagerDeviceList" style="max-height:420px;overflow-y:auto">';
+            if (devlist.length == 0) { x += '<div style="color:#888;padding:4px">No devices</div>'; }
             for (var i = 0; i < devlist.length; i++) {
                 var n = devlist[i];
-                var conn = ((n.conn & 1) != 0);
-                x += '<option value="' + EscapeHtml(n._id) + '"' + (conn ? '' : ' disabled') + '>' + EscapeHtml(n.name) + (conn ? '' : ' (offline)') + '</option>';
+                var on = ((n.conn & 1) != 0);
+                var os = pluginHandler.pkgmanager.pkgTargetOs(n);
+                x += '<label style="display:block;padding:4px 2px;border-bottom:1px solid #eee;' + (on ? 'cursor:pointer' : 'color:#999;cursor:not-allowed') + '">';
+                x += '<input type=checkbox class="pkgmanagerDevCb" value="' + EscapeHtml(n._id) + '"' + (on ? '' : ' disabled') + ' onchange="pluginHandler.pkgmanager.pkgDevToggle()"> ';
+                x += '<b>' + EscapeHtml(n.name) + '</b> <span style="color:#888">· ' + os + (on ? ' · online' : ' · offline') + '</span></label>';
             }
-            if (devlist.length == 0) { x += '<option value="">No devices</option>'; }
-            x += '</select></div>';
-            x += '<div style="margin-bottom:8px;color:#888">Installs run through the standard remote-command channel of the selected device (rights checked; output in the results dialog).</div>';
-            x += '<div id="pkgmanagerTableWrap"></div>';
+            x += '</div><div style="margin-top:6px;color:#888;font-size:12px">Offline machines cannot be selected.</div>';
+            x += '</div></div>';
             x += '<div id="pkgmanagerMsg" style="margin-top:10px;color:#888"></div>';
             m.innerHTML = x;
             pluginHandler.pkgmanager.pkgSidebarRender();
         } catch (e) { console.log('pkgmanager device render failed: ' + e); }
     };
 
-    obj.pkgSidebarRender = function () {
-        try {
-            var w = document.getElementById('pkgmanagerTableWrap');
-            if (w == null) return;
-            var cat = window.pkgmanagerCatalog;
-            if ((cat == null) || (cat.packages == null)) { w.innerHTML = '<div style="color:#888">Loading package catalog…</div>'; return; }
-            w.innerHTML = pluginHandler.pkgmanager.pkgTableHtml(cat.packages, 'sidebar');
-        } catch (e) { console.log('pkgmanager sidebar table failed: ' + e); }
+    obj.pkgDevToggle = function () { pluginHandler.pkgmanager.pkgSidebarRender(); };
+
+    obj.pkgDevSelectAll = function (v) {
+        try { var cbs = document.querySelectorAll('.pkgmanagerDevCb'); for (var i = 0; i < cbs.length; i++) { if (!cbs[i].disabled) cbs[i].checked = v; } } catch (e) { }
+        pluginHandler.pkgmanager.pkgSidebarRender();
     };
 
-    obj.pkgSidebarInstall = function (pkgid) {
+    obj.pkgSelectedNodes = function () {
+        var out = [];
         try {
-            var sel = document.getElementById('pkgmanagerDevSel');
-            if ((sel == null) || (sel.value == null) || (sel.value == '')) { pluginHandler.pkgmanager.pkgMsg('No target device selected.'); return; }
-            var n = null;
-            for (var i in nodes) { if (nodes[i] && (nodes[i]._id == sel.value)) { n = nodes[i]; break; } }
-            pluginHandler.pkgmanager.pkgRunOn(n, pkgid);
-        } catch (e) { console.log('pkgmanager sidebar install failed: ' + e); }
+            var cbs = document.querySelectorAll('.pkgmanagerDevCb');
+            for (var i = 0; i < cbs.length; i++) {
+                if (!cbs[i].checked) continue;
+                for (var j in nodes) { if (nodes[j] && (nodes[j]._id == cbs[i].value)) { out.push(nodes[j]); break; } }
+            }
+        } catch (e) { }
+        return out;
     };
 
     obj.pkgMsg = function (t) {
@@ -143,6 +154,31 @@ module.exports.pkgmanager = function (parent) {
             var m2 = document.getElementById('pkgmanagerMsgTab');
             if (m2 != null) { m2.innerText = t; }
         } catch (e) { }
+    };
+
+    // Re-render ONLY the package table (the checkbox panel keeps its state):
+    // a package is visible only if it has an install def for every OS selected.
+    obj.pkgSidebarRender = function () {
+        try {
+            var w = document.getElementById('pkgmanagerTableWrap');
+            if (w == null) return;
+            var cat = window.pkgmanagerCatalog;
+            if ((cat == null) || (cat.packages == null)) { w.innerHTML = '<div style="color:#888">Loading package catalog…</div>'; return; }
+            var sel = pluginHandler.pkgmanager.pkgSelectedNodes();
+            var oses = {}; for (var i = 0; i < sel.length; i++) { oses[pluginHandler.pkgmanager.pkgTargetOs(sel[i])] = 1; }
+            var osList = Object.keys(oses);
+            var shown = [], hidden = 0;
+            for (var i = 0; i < cat.packages.length; i++) {
+                var p = cat.packages[i]; var okp = true;
+                for (var k = 0; k < osList.length; k++) { if (p[osList[k]] == null) { okp = false; break; } }
+                if (okp) { shown.push(p); } else { hidden++; }
+            }
+            var note = document.getElementById('pkgmanagerFilterNote');
+            if (note != null) { note.innerText = (osList.length ? ('(' + shown.length + ' of ' + cat.packages.length + ' shown — target OS: ' + osList.join(', ') + ')') : '(' + cat.packages.length + ' of ' + cat.packages.length + ' — select machines to filter by OS)'); }
+            var sum = document.getElementById('pkgmanagerSelSummary');
+            if (sum != null) { sum.innerText = (sel.length ? (sel.length + ' machine(s) selected — Install runs on ALL of them, grouped by OS.' ) : 'Select target machines on the right; the package list filters by their OS.'); }
+            w.innerHTML = pluginHandler.pkgmanager.pkgTableHtml(shown, 'sidebar');
+        } catch (e) { console.log('pkgmanager sidebar table failed: ' + e); }
     };
 
     // meshserver.send() is a silent no-op until the user WS is connected (connectstate==1):
@@ -208,6 +244,39 @@ module.exports.pkgmanager = function (parent) {
         } catch (e) { return '<div style="color:red">render error</div>'; }
     };
 
+    // MULTI-TARGET install: run the package on ALL selected machines in ONE
+    // pending/results dialog. Group the targets by OS, open a single d2runBegin
+    // tracking every nodeid, then send one rights-checked runcommands per OS
+    // group reusing that responseid — d2runResultReceive updates per-machine
+    // rows inside the same dialog.
+    obj.pkgSidebarInstall = function (pkgid) {
+        try {
+            var cat = window.pkgmanagerCatalog;
+            if ((cat == null) || (cat.packages == null)) { pluginHandler.pkgmanager.pkgMsg('Catalog not loaded.'); return; }
+            var pkg = null;
+            for (var i = 0; i < cat.packages.length; i++) { if (cat.packages[i].id == pkgid) { pkg = cat.packages[i]; break; } }
+            if (pkg == null) { pluginHandler.pkgmanager.pkgMsg('Unknown package.'); return; }
+            var sel = pluginHandler.pkgmanager.pkgSelectedNodes();
+            if (sel.length == 0) { pluginHandler.pkgmanager.pkgMsg('Select at least one target machine on the right.'); return; }
+            var groups = {}, allids = [];
+            for (var i = 0; i < sel.length; i++) {
+                var n = sel[i];
+                if ((n.conn & 1) == 0) { continue; }
+                var os = pluginHandler.pkgmanager.pkgTargetOs(n);
+                if (pkg[os] == null) { pluginHandler.pkgmanager.pkgMsg('"' + pkg.name + '" has no install for ' + os + ' (' + n.name + ').'); return; }
+                if (groups[os] == null) { groups[os] = []; }
+                groups[os].push(n._id); allids.push(n._id);
+            }
+            if (allids.length == 0) { pluginHandler.pkgmanager.pkgMsg('No connected machine selected.'); return; }
+            var responseid = d2runBegin(allids);
+            for (var os in groups) {
+                var def = pkg[os];
+                meshserver.send({ action: 'runcommands', nodeids: groups[os], type: def.type, cmds: def.cmd, runAsUser: 0, reply: true, responseid: responseid, timeout: (def.timeout || 300) });
+            }
+            pluginHandler.pkgmanager.pkgMsg('Install of "' + pkg.name + '" started on ' + allids.length + ' machine(s) — output in the results dialog.');
+        } catch (e) { console.log('pkgmanager sidebar install failed: ' + e); }
+    };
+
     // Compose the standard rights-checked runcommands action with reply: opens the
     // pending/results dialog (this fork) and the device output comes back into it.
     obj.pkgRunOn = function (n, pkgid) {
@@ -227,7 +296,7 @@ module.exports.pkgmanager = function (parent) {
         } catch (e) { console.log('pkgmanager run failed: ' + e); }
     };
 
-    // Per-device tab (p19 "Plugins") entry: uses the currently selected device.
+    // Per-device tab (p19 "Plugins") entry: single target, the current device.
     obj.pkgInstall = function (pkgid) {
         pluginHandler.pkgmanager.pkgRunOn((typeof currentNode != 'undefined') ? currentNode : null, pkgid);
     };
