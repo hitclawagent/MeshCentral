@@ -45,7 +45,7 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '0.7.1';
+    obj.version = '0.7.2';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -98,14 +98,18 @@ module.exports.pkgmanager = function (parent) {
             // by goPageStart on every go(). "Gestione pacchetti" starts hidden
             // and is shown by pkgTabSetActive() once userinfo is known (admins).
             var sub = document.getElementById('MainSubMenuSpan') || document.getElementById('MainMenuSpan');
+            var span = document.createElement('div');
+            span.id = 'pkgmanagerMenuSpan';
+            span.style.display = 'none';
             if ((sub != null) && (sub.parentNode != null)) {
-                var span = document.createElement('div');
-                span.id = 'pkgmanagerMenuSpan';
-                span.style.display = 'none';
-                span.innerHTML = '<table id="pkgmanagerMenuTable" cellpadding=0 cellspacing=0 class="style1"><tr>'
-                    + '<td tabindex=0 id="MainTabPackages" class="topbar_td style3x" onmouseup="pluginHandler.pkgmanager.pkgSidebarOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgSidebarOpen()">Installazione pacchetti</td>'
-                    + '<td tabindex=0 id="MainTabPkgMgmt" class="topbar_td style3x" style="display:none" onmouseup="pluginHandler.pkgmanager.pkgAdminOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgAdminOpen()">Gestione pacchetti</td>'
-                    + '<td tabindex=0 id="MainTabPkgCreate" class="topbar_td style3x" style="display:none" onmouseup="pluginHandler.pkgmanager.pkgCreateOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgCreateOpen()">Creazione pacchetti</td>'
+                // v0.7.2: full-width row like the core device tab row (the core CSS width:100% on
+                // #MainSubMenuSpan/#MainSubMenu does not cover this plugin span -> inline on both)
+                // + padded entries (16px, like the core nonenglish tabs) so they are not glued.
+                span.style.width = '100%';
+                span.innerHTML = '<table id="pkgmanagerMenuTable" cellpadding=0 cellspacing=0 class="style1" style="width:100%"><tr>'
+                    + '<td tabindex=0 id="MainTabPackages" class="topbar_td style3x" style="padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgSidebarOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgSidebarOpen()">Installazione pacchetti</td>'
+                    + '<td tabindex=0 id="MainTabPkgMgmt" class="topbar_td style3x" style="display:none;padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgAdminOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgAdminOpen()">Gestione pacchetti</td>'
+                    + '<td tabindex=0 id="MainTabPkgCreate" class="topbar_td style3x" style="display:none;padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgCreateOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgCreateOpen()">Creazione pacchetti</td>'
                     + '<td class="topbar_td_end style3">&nbsp;</td>'
                     + '</tr></table>';
                 sub.parentNode.insertBefore(span, sub.nextSibling);
