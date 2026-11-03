@@ -2,15 +2,21 @@
  * MeshCentral Package Manager plugin ("pkgmanager") — v0.5.0.
  *
  * Design: the catalog lives server-side (catalog.json next to this file).
- * A "Packages" entry in the LEFT SIDEBAR opens a DROPDOWN MENU:
- *   - "Installa sui dispositivi" (main page): package table + target machine
- *     checkboxes on the right; the list auto-filters by the OSes of the
- *     selected machines; installs run on EVERY selected machine and the
- *     output comes back into ONE results dialog (runcommands reply).
+ * The plugin pages are TABS IN THE TOP GRAY BAR (their own
+ * #pkgmanagerMenuSpan row next to #MainSubMenuSpan — the span that renders
+ * the per-device General/Desktop/Terminal/Files tabs — with the same
+ * topbar_td style3x classes; the active tab carries the same fullselect
+ * class go() toggles on the core tabs; the row shows while a plugin page is
+ * open and hides on navigation):
+ *   - "Pacchetti" -> "Installa sui dispositivi" (main page): package table +
+ *     target machine checkboxes on the right; the list auto-filters by the
+ *     OSes of the selected machines; installs run on EVERY selected machine
+ *     and the output comes back into ONE results dialog (runcommands reply).
  *   - "Gestione pacchetti" (full site admins only): catalog management —
  *     add / edit / delete packages and upload / delete airgap artifacts
  *     straight from the UI.
- * The per-device "Plugins" tab (p19) keeps a single-device entry point.
+ * The sidebar box opens the main page directly (no dropdown), and the
+ * per-device "Plugins" tab (p19) keeps a single-device entry point.
  *
  * AIRGAP (v0.4.0+): packages install WITHOUT internet. Artifacts are dropped
  * on the server in <datapath>/plugins/pkgmanager/store/<pkg-id>/<file> — or
@@ -34,13 +40,13 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '0.5.0';
+    obj.version = '0.6.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgSidebarMenu', 'pkgMenuNav', 'pkgMenuClose', 'pkgAdminOpen', 'pkgAdminRender', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -54,8 +60,9 @@ module.exports.pkgmanager = function (parent) {
     };
 
     // "Packages" entry in the LEFT SIDEBAR (classic + default3 render #page_leftbar;
-    // mobile has none, the injection skips there). Clicking it opens the DROPDOWN
-    // MENU with the plugin pages. The per-device "Plugins" tab from
+    // mobile has none, the injection skips there). Clicking it opens the main
+    // page directly (no dropdown). The plugin pages are TABS IN THE TOP GRAY
+    // BAR (see the injection below). The per-device "Plugins" tab from
     // registerPluginTab keeps working as a second entry point.
     obj.pkgSidebarInject = function () {
         try {
@@ -67,7 +74,7 @@ module.exports.pkgmanager = function (parent) {
             b.className = 'lbbutton';
             b.title = 'Gestione pacchetti';
             b.setAttribute('tabindex', '0');
-            b.setAttribute('onmouseup', 'pluginHandler.pkgmanager.pkgSidebarMenu()');
+            b.setAttribute('onmouseup', 'pluginHandler.pkgmanager.pkgSidebarOpen()');
             // Icon sized to match the other sidebar entries (.lbtg is 62x62).
             b.innerHTML = '<div style="position:absolute;top:8px;left:0;width:100%;text-align:center;font-size:46px;line-height:58px">📦</div>';
             lb.appendChild(b);
@@ -78,54 +85,56 @@ module.exports.pkgmanager = function (parent) {
             page.style.display = 'none';
             page.innerHTML = '<div id="pkgmanagerMain" style="padding:12px;font-family:Arial,Helvetica,sans-serif"></div>';
             col.appendChild(page);
-            console.log('pkgmanager: sidebar entry injected');
+            // TOP GRAY BAR: the classic template HIDES #MainMenuSpan and shows
+            // the per-device tabs (General/Desktop/Files) in #MainSubMenuSpan.
+            // Render the plugin tabs in the SAME place and style: our own
+            // #pkgmanagerMenuSpan div + table (topbar_td style3x) as a sibling
+            // of #MainSubMenuSpan, shown while a plugin page is open and hidden
+            // by goPageStart on every go(). "Gestione pacchetti" starts hidden
+            // and is shown by pkgTabSetActive() once userinfo is known (admins).
+            var sub = document.getElementById('MainSubMenuSpan');
+            if ((sub != null) && (sub.parentNode != null)) {
+                var span = document.createElement('div');
+                span.id = 'pkgmanagerMenuSpan';
+                span.style.display = 'none';
+                span.innerHTML = '<table id="pkgmanagerMenuTable" cellpadding=0 cellspacing=0 class="style1"><tr>'
+                    + '<td tabindex=0 id="MainTabPackages" class="topbar_td style3x" onmouseup="pluginHandler.pkgmanager.pkgSidebarOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgSidebarOpen()">Pacchetti</td>'
+                    + '<td tabindex=0 id="MainTabPkgMgmt" class="topbar_td style3x" style="display:none" onmouseup="pluginHandler.pkgmanager.pkgAdminOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgAdminOpen()">Gestione pacchetti</td>'
+                    + '<td class="topbar_td_end style3">&nbsp;</td>'
+                    + '</tr></table>';
+                sub.parentNode.insertBefore(span, sub.nextSibling);
+            }
+            console.log('pkgmanager: sidebar entry + top bar tabs injected');
         } catch (e) { console.log('pkgmanager sidebar inject failed: ' + e); }
     };
 
-    // Dropdown menu: "Installa sui dispositivi" for everyone,
-    // "Gestione pacchetti" only for full site admins (userinfo.siteadmin).
-    obj.pkgSidebarMenu = function () {
+    // Top gray bar tab state: our #pkgmanagerMenuSpan row shows while a plugin
+    // page is open (like #MainSubMenuSpan does while a device is selected);
+    // goPageStart (-> null) hides it. Highlight the ACTIVE plugin tab with the
+    // same class go() toggles on the core tabs (fullselect), keep "Gestione
+    // pacchetti" visible to full site admins only (userinfo.siteadmin), and
+    // reserve the submenu row height on column_l exactly like go() does
+    // (room4submenu) so the page does not slide under the bar.
+    obj.pkgTabSetActive = function (which) {
         try {
-            pluginHandler.pkgmanager.pkgMenuClose();
-            var b = document.getElementById('LeftMenuPackages');
-            if (b == null) return;
-            var r = b.getBoundingClientRect();
-            var isAdmin = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
-            var m = document.createElement('div');
-            m.id = 'pkgmanagerMenu';
-            m.style.cssText = 'position:fixed;left:' + (r.right + 6) + 'px;top:' + r.top + 'px;background:#fff;border:1px solid #bbb;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:110000;min-width:240px;padding:4px 0;font-family:Arial,Helvetica,sans-serif';
-            var items = [['install', 'Installa sui dispositivi']];
-            if (isAdmin) { items.push(['admin', 'Gestione pacchetti']); }
-            for (var i = 0; i < items.length; i++) {
-                var it = document.createElement('div');
-                it.style.cssText = 'padding:10px 18px;cursor:pointer;font-size:14px';
-                it.innerText = items[i][1];
-                it.setAttribute('onclick', "pluginHandler.pkgmanager.pkgMenuNav('" + items[i][0] + "')");
-                m.appendChild(it);
+            var span = document.getElementById('pkgmanagerMenuSpan');
+            if (span == null) return;
+            var t1 = document.getElementById('MainTabPackages');
+            var t2 = document.getElementById('MainTabPkgMgmt');
+            var adm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
+            if (t2 != null) { t2.style.display = adm ? '' : 'none'; }
+            if (which == null) {
+                span.style.display = 'none';
+                if (t1 != null) { t1.classList.remove('fullselect'); }
+                if (t2 != null) { t2.classList.remove('fullselect'); }
+                try { QC('column_l').remove('room4submenu'); } catch (e) { }
+            } else {
+                span.style.display = '';
+                if (t1 != null) { if (which == 'install') { t1.classList.add('fullselect'); } else { t1.classList.remove('fullselect'); } }
+                if (t2 != null) { if (which == 'admin') { t2.classList.add('fullselect'); } else { t2.classList.remove('fullselect'); } }
+                try { QC('column_l').add('room4submenu'); } catch (e) { }
             }
-            document.body.appendChild(m);
-            setTimeout(function () {
-                var closer = function (ev) {
-                    document.removeEventListener('mouseup', closer, true);
-                    var t = ev.target;
-                    while ((t != null) && (t.id != 'pkgmanagerMenu')) { t = t.parentElement; }
-                    if (t == null) { pluginHandler.pkgmanager.pkgMenuClose(); }
-                };
-                document.addEventListener('mouseup', closer, true);
-            }, 0);
-        } catch (e) { console.log('pkgmanager menu failed: ' + e); }
-    };
-
-    obj.pkgMenuNav = function (which) {
-        try {
-            pluginHandler.pkgmanager.pkgMenuClose();
-            if (which == 'admin') { pluginHandler.pkgmanager.pkgAdminOpen(); }
-            else { pluginHandler.pkgmanager.pkgSidebarOpen(); }
-        } catch (e) { console.log('pkgmanager menu nav failed: ' + e); }
-    };
-
-    obj.pkgMenuClose = function () {
-        try { var m = document.getElementById('pkgmanagerMenu'); if (m != null) { m.remove(); } } catch (e) { }
+        } catch (e) { }
     };
 
     // go() calls this hook on EVERY navigation (also on re-selecting the current
@@ -133,7 +142,7 @@ module.exports.pkgmanager = function (parent) {
     obj.goPageStart = function (x, event) {
         try {
             window.pkgmanagerView = null;
-            pluginHandler.pkgmanager.pkgMenuClose();
+            pluginHandler.pkgmanager.pkgTabSetActive(null);
             var w = document.getElementById('pkgmanagerMainWrap');
             if (w != null) w.style.display = 'none';
             var b = document.getElementById('LeftMenuPackages');
@@ -153,6 +162,7 @@ module.exports.pkgmanager = function (parent) {
             } catch (e) { }
             w.style.display = '';
             window.pkgmanagerView = 'install';
+            pluginHandler.pkgmanager.pkgTabSetActive('install');
             var b = document.getElementById('LeftMenuPackages');
             if (b != null) b.style.opacity = '1';
             pluginHandler.pkgmanager.pkgSidebarRenderDevices();
@@ -171,6 +181,7 @@ module.exports.pkgmanager = function (parent) {
             w.style.display = '';
             window.pkgmanagerView = 'admin';
             window.pkgmanagerAdminMsg = '';
+            pluginHandler.pkgmanager.pkgTabSetActive('admin');
             var b = document.getElementById('LeftMenuPackages');
             if (b != null) b.style.opacity = '1';
             pluginHandler.pkgmanager.pkgAdminRender();
@@ -446,6 +457,7 @@ module.exports.pkgmanager = function (parent) {
             window.pkgmanagerCatalog = message.catalog;
             window.pkgmanagerToken = message.token;
             if (message.opAck != null) { window.pkgmanagerAdminMsg = message.opAck; }
+            pluginHandler.pkgmanager.pkgTabSetActive(window.pkgmanagerView);
             var cat = window.pkgmanagerCatalog;
             var d = document.getElementById('pkgmanagerTab');
             if (d != null) {
