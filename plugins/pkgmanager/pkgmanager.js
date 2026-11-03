@@ -8,13 +8,16 @@
  * topbar_td style3x classes; the active tab carries the same fullselect
  * class go() toggles on the core tabs; the row shows while a plugin page is
  * open and hides on navigation):
- *   - "Pacchetti" -> "Installa sui dispositivi" (main page): package table +
- *     target machine checkboxes on the right; the list auto-filters by the
- *     OSes of the selected machines; installs run on EVERY selected machine
- *     and the output comes back into ONE results dialog (runcommands reply).
+ *   - "Installazione pacchetti" (everyone) -> the existing install page:
+ *     package table + target machine checkboxes on the right; the list
+ *     auto-filters by the OSes of the selected machines; installs run on
+ *     EVERY selected machine and the output comes back into ONE results
+ *     dialog (runcommands reply).
  *   - "Gestione pacchetti" (full site admins only): catalog management —
  *     add / edit / delete packages and upload / delete airgap artifacts
  *     straight from the UI.
+ *   - "Creazione pacchetti" (full site admins only): ENTRY ONLY for now
+ *     (per the user request) — the guided package builder lands later.
  * The sidebar box opens the main page directly (no dropdown), and the
  * per-device "Plugins" tab (p19) keeps a single-device entry point.
  *
@@ -40,13 +43,13 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '0.6.0';
+    obj.version = '0.7.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -98,8 +101,9 @@ module.exports.pkgmanager = function (parent) {
                 span.id = 'pkgmanagerMenuSpan';
                 span.style.display = 'none';
                 span.innerHTML = '<table id="pkgmanagerMenuTable" cellpadding=0 cellspacing=0 class="style1"><tr>'
-                    + '<td tabindex=0 id="MainTabPackages" class="topbar_td style3x" onmouseup="pluginHandler.pkgmanager.pkgSidebarOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgSidebarOpen()">Pacchetti</td>'
+                    + '<td tabindex=0 id="MainTabPackages" class="topbar_td style3x" onmouseup="pluginHandler.pkgmanager.pkgSidebarOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgSidebarOpen()">Installazione pacchetti</td>'
                     + '<td tabindex=0 id="MainTabPkgMgmt" class="topbar_td style3x" style="display:none" onmouseup="pluginHandler.pkgmanager.pkgAdminOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgAdminOpen()">Gestione pacchetti</td>'
+                    + '<td tabindex=0 id="MainTabPkgCreate" class="topbar_td style3x" style="display:none" onmouseup="pluginHandler.pkgmanager.pkgCreateOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgCreateOpen()">Creazione pacchetti</td>'
                     + '<td class="topbar_td_end style3">&nbsp;</td>'
                     + '</tr></table>';
                 sub.parentNode.insertBefore(span, sub.nextSibling);
@@ -121,26 +125,35 @@ module.exports.pkgmanager = function (parent) {
             if (span == null) return;
             var t1 = document.getElementById('MainTabPackages');
             var t2 = document.getElementById('MainTabPkgMgmt');
+            var t3 = document.getElementById('MainTabPkgCreate');
             var adm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
             if (t2 != null) { t2.style.display = adm ? '' : 'none'; }
+            if (t3 != null) { t3.style.display = adm ? '' : 'none'; }
+            var ts = [t1, t2, t3];
+            var act = { install: t1, admin: t2, create: t3 };
             if (which == null) {
                 span.style.display = 'none';
-                if (t1 != null) { t1.classList.remove('fullselect'); }
-                if (t2 != null) { t2.classList.remove('fullselect'); }
+                for (var i = 0; i < ts.length; i++) { if (ts[i] != null) { ts[i].classList.remove('fullselect'); } }
                 try { QC('column_l').remove('room4submenu'); } catch (e) { }
             } else {
                 span.style.display = '';
-                if (t1 != null) { if (which == 'install') { t1.classList.add('fullselect'); } else { t1.classList.remove('fullselect'); } }
-                if (t2 != null) { if (which == 'admin') { t2.classList.add('fullselect'); } else { t2.classList.remove('fullselect'); } }
+                for (var i = 0; i < ts.length; i++) { if (ts[i] != null) { ts[i].classList.remove('fullselect'); } }
+                var a = act[which];
+                if (a != null) { a.classList.add('fullselect'); }
                 try { QC('column_l').add('room4submenu'); } catch (e) { }
             }
         } catch (e) { }
     };
 
-    // go() calls this hook on EVERY navigation (also on re-selecting the current
-    // view): close the plugin pages and the menu there — the single restore point.
+    // go() calls this hook on EVERY navigation — but BEFORE its own modal guard
+    // (`if (xxdialogMode) return;`): a go() fired while a modal is open (e.g. the
+    // async startup-view re-entry the template runs on a server event) is a NO-OP
+    // for the core, yet would tear this page down. Mirror the core guard: with a
+    // modal open keep the plugin page; a real navigation (modal closed) still
+    // tears it down.
     obj.goPageStart = function (x, event) {
         try {
+            if ((typeof xxdialogMode !== 'undefined') && xxdialogMode) return; // core would no-op this go()
             window.pkgmanagerView = null;
             pluginHandler.pkgmanager.pkgTabSetActive(null);
             var w = document.getElementById('pkgmanagerMainWrap');
@@ -194,6 +207,38 @@ module.exports.pkgmanager = function (parent) {
             pluginHandler.pkgmanager.pkgRequestList();
             pluginHandler.pkgmanager.pkgAdminStatus('Ricarico catalogo…');
         } catch (e) { }
+    };
+
+    // ---- "Creazione pacchetti" (full site admins) ----
+    // ENTRY ONLY for now (user request): the guided package builder lands in
+    // a later version; the tab opens a placeholder page so the flow exists
+    // end-to-end and the label sits in the gray bar as requested.
+    obj.pkgCreateOpen = function () {
+        try {
+            var w = document.getElementById('pkgmanagerMainWrap');
+            if (w == null) return;
+            try {
+                if ((typeof xxcurrentView == 'number') && (xxcurrentView >= 0) && (xxcurrentView <= 60)) { QV('p' + xxcurrentView, false); }
+                xxcurrentView = -1;
+            } catch (e) { }
+            w.style.display = '';
+            window.pkgmanagerView = 'create';
+            window.pkgmanagerAdminMsg = '';
+            pluginHandler.pkgmanager.pkgTabSetActive('create');
+            var b = document.getElementById('LeftMenuPackages');
+            if (b != null) b.style.opacity = '1';
+            pluginHandler.pkgmanager.pkgCreateRender();
+        } catch (e) { console.log('pkgmanager create open failed: ' + e); }
+    };
+
+    obj.pkgCreateRender = function () {
+        try {
+            var m = document.getElementById('pkgmanagerMain');
+            if (m == null) return;
+            var x = '<div style="margin-bottom:8px;font-size:16px"><b>Creazione pacchetti</b></div>';
+            x += '<div style="color:#888;padding:8px 0">La creazione guidata dei pacchetti arriva nelle prossime versioni del plugin. Da qui potrai costruire un pacchetto (definizioni per OS, artefatti airgap, comando d\'installazione) e salvarlo nel catalogo.</div>';
+            m.innerHTML = x;
+        } catch (e) { console.log('pkgmanager create render failed: ' + e); }
     };
 
     obj.pkgAdminRender = function () {
@@ -472,6 +517,7 @@ module.exports.pkgmanager = function (parent) {
                 }
             }
             if (window.pkgmanagerView == 'admin') { pluginHandler.pkgmanager.pkgAdminRender(); }
+            else if (window.pkgmanagerView == 'create') { pluginHandler.pkgmanager.pkgCreateRender(); }
             else { pluginHandler.pkgmanager.pkgSidebarRender(); }
         } catch (e) { console.log('pkgmanager render failed: ' + e); }
     };
@@ -481,6 +527,7 @@ module.exports.pkgmanager = function (parent) {
         try {
             window.pkgmanagerAdminMsg = ((message != null) && (message.msg != null)) ? message.msg : 'Operazione negata.';
             if (window.pkgmanagerView == 'admin') { pluginHandler.pkgmanager.pkgAdminRender(); }
+            else if (window.pkgmanagerView == 'create') { pluginHandler.pkgmanager.pkgCreateRender(); }
             else { pluginHandler.pkgmanager.pkgMsg(window.pkgmanagerAdminMsg); }
             console.log('pkgmanager: negato: ' + window.pkgmanagerAdminMsg);
         } catch (e) { }
