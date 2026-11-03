@@ -8,9 +8,17 @@
  * back into the pending/results dialog built by this fork (timeout, busy
  * replies and server-side error attribution included).
  *
- * Server surface: serveraction "list" only — it reads catalog.json and sends
- * it back to the requesting session. Installs are composed client-side and go
- * through the core runcommands path, which enforces device rights (131072).
+ * AIRGAP (v0.4.0): packages install WITHOUT internet. Artifacts are dropped
+ * manually on the server in <datapath>/plugins/pkgmanager/store/<pkg-id>/<file>
+ * and served to the AGENT over the LAN by this plugin via /pkgstore.ashx
+ * (per-process token; SHA-384 injected into the composed command). The device
+ * downloads the artifact FROM THIS SERVER and installs it locally
+ * (dpkg -i / msiexec / installer -pkg / plain script). Catalog "cmd" supports
+ * the {{url}} and {{sha384}} placeholders.
+ *
+ * Server surface: serveraction "list" (catalog + token + artifact enrichment),
+ * hook_setupHttpHandlers registers /pkgstore.ashx. Installs are composed
+ * client-side and go through the core runcommands path (rights enforced).
  *
  * Client functions listed in obj.exports are stringified into the browser by
  * pluginHandler.prepExports() and run in page context: they must not reference
@@ -18,14 +26,15 @@
  * d2runBegin...) and pluginHandler.pkgmanager.*.
  */
 module.exports.pkgmanager = function (parent) {
+    var crypto = require('crypto');
     var obj = {};
-    obj.version = '0.3.0';
+    obj.version = '0.4.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -177,7 +186,7 @@ module.exports.pkgmanager = function (parent) {
             if (note != null) { note.innerText = (osList.length ? ('(' + shown.length + ' of ' + cat.packages.length + ' shown — target OS: ' + osList.join(', ') + ')') : '(' + cat.packages.length + ' of ' + cat.packages.length + ' — select machines to filter by OS)'); }
             var sum = document.getElementById('pkgmanagerSelSummary');
             if (sum != null) { sum.innerText = (sel.length ? (sel.length + ' machine(s) selected — Install runs on ALL of them, grouped by OS.' ) : 'Select target machines on the right; the package list filters by their OS.'); }
-            w.innerHTML = pluginHandler.pkgmanager.pkgTableHtml(shown, 'sidebar');
+            w.innerHTML = pluginHandler.pkgmanager.pkgTableHtml(shown, 'sidebar', osList);
         } catch (e) { console.log('pkgmanager sidebar table failed: ' + e); }
     };
 
@@ -209,6 +218,7 @@ module.exports.pkgmanager = function (parent) {
         console.log('pkgmanager: pkgList called');
         try {
             window.pkgmanagerCatalog = message.catalog;
+            window.pkgmanagerToken = message.token;
             var cat = window.pkgmanagerCatalog;
             var d = document.getElementById('pkgmanagerTab');
             if (d != null) {
@@ -226,7 +236,23 @@ module.exports.pkgmanager = function (parent) {
         } catch (e) { console.log('pkgmanager render failed: ' + e); }
     };
 
-    obj.pkgTableHtml = function (pkgs, mode) {
+    // Compose the device-side install command for a package def. Airgap: when the
+    // def carries an artifact, substitute {{url}} (LAN download URL from THIS
+    // server, token included) and {{sha384}} (server-computed artifact hash).
+    // Returns null if the artifact is missing in the server store (Install disabled).
+    obj.pkgCompose = function (pkg, def) {
+        try {
+            if (def == null) { return null; }
+            if (def.artifact != null) {
+                if ((def.artifactMissing === true) || (def.sha384 == null) || (window.pkgmanagerToken == null)) { return null; }
+                var url = location.origin + '/pkgstore.ashx?t=' + encodeURIComponent(window.pkgmanagerToken) + '&p=' + encodeURIComponent(pkg.id + '/' + def.artifact);
+                return String(def.cmd).split('{{url}}').join(url).split('{{sha384}}').join(def.sha384);
+            }
+            return String(def.cmd);
+        } catch (e) { return null; }
+    };
+
+    obj.pkgTableHtml = function (pkgs, mode, osList) {
         try {
             var click = ((mode == 'sidebar') ? 'pluginHandler.pkgmanager.pkgSidebarInstall' : 'pluginHandler.pkgmanager.pkgInstall');
             var x = '<table style="border-collapse:collapse;width:100%">';
@@ -237,7 +263,19 @@ module.exports.pkgmanager = function (parent) {
                 if (p.linux != null) { osl.push('Linux'); }
                 if (p.windows != null) { osl.push('Windows'); }
                 if (p.macos != null) { osl.push('macOS'); }
-                x += '<tr style="border-bottom:1px solid #eee"><td style="padding:4px"><b>' + EscapeHtml(p.name) + '</b></td><td style="padding:4px">' + EscapeHtml(osl.join(', ')) + '</td><td style="padding:4px">' + EscapeHtml(p.description || '') + '</td><td style="padding:4px"><input type=button value="Install" onclick="' + click + '(\'' + EscapeHtml(p.id) + '\')"></td></tr>';
+                // Airgap: a def that needs a store artifact missing on the server
+                // gets its Install button disabled (drop the file on the server).
+                var missing = false;
+                if (mode == 'sidebar') {
+                    for (var k = 0; k < ((osList != null) ? osList.length : 0); k++) {
+                        var def = p[osList[k]];
+                        if ((def != null) && (def.artifact != null) && ((def.artifactMissing === true) || (def.sha384 == null))) { missing = true; break; }
+                    }
+                }
+                var btn = (missing
+                    ? '<input type=button value="Install" disabled title="Artifact missing in the server store (plugins/pkgmanager/store/' + EscapeHtml(p.id) + ')" style="opacity:0.5">'
+                    : '<input type=button value="Install" onclick="' + click + '(\'' + EscapeHtml(p.id) + '\')">');
+                x += '<tr style="border-bottom:1px solid #eee"><td style="padding:4px"><b>' + EscapeHtml(p.name) + '</b></td><td style="padding:4px">' + EscapeHtml(osl.join(', ')) + '</td><td style="padding:4px">' + EscapeHtml(p.description || '') + '</td><td style="padding:4px">' + btn + '</td></tr>';
             }
             x += '</table>';
             return x;
@@ -247,8 +285,8 @@ module.exports.pkgmanager = function (parent) {
     // MULTI-TARGET install: run the package on ALL selected machines in ONE
     // pending/results dialog. Group the targets by OS, open a single d2runBegin
     // tracking every nodeid, then send one rights-checked runcommands per OS
-    // group reusing that responseid — d2runResultReceive updates per-machine
-    // rows inside the same dialog.
+    // group reusing that responseid. Airgap: each group command is composed from
+    // the group OS def ({{url}} LAN artifact URL + {{sha384}} verification).
     obj.pkgSidebarInstall = function (pkgid) {
         try {
             var cat = window.pkgmanagerCatalog;
@@ -268,17 +306,21 @@ module.exports.pkgmanager = function (parent) {
                 groups[os].push(n._id); allids.push(n._id);
             }
             if (allids.length == 0) { pluginHandler.pkgmanager.pkgMsg('No connected machine selected.'); return; }
+            var cmds = {};
+            for (var os in groups) {
+                var cmd = pluginHandler.pkgmanager.pkgCompose(pkg, pkg[os]);
+                if (cmd == null) { pluginHandler.pkgmanager.pkgMsg('"' + pkg.name + '" (' + os + '): artifact missing in the server store — copy it into plugins/pkgmanager/store/' + EscapeHtml(pkg.id) + '/ on the server.'); return; }
+                cmds[os] = cmd;
+            }
             var responseid = d2runBegin(allids);
             for (var os in groups) {
-                var def = pkg[os];
-                meshserver.send({ action: 'runcommands', nodeids: groups[os], type: def.type, cmds: def.cmd, runAsUser: 0, reply: true, responseid: responseid, timeout: (def.timeout || 300) });
+                meshserver.send({ action: 'runcommands', nodeids: groups[os], type: pkg[os].type, cmds: cmds[os], runAsUser: 0, reply: true, responseid: responseid, timeout: (pkg[os].timeout || 300) });
             }
-            pluginHandler.pkgmanager.pkgMsg('Install of "' + pkg.name + '" started on ' + allids.length + ' machine(s) — output in the results dialog.');
+            pluginHandler.pkgmanager.pkgMsg('Airgap install of "' + pkg.name + '" started on ' + allids.length + ' machine(s) — artifact served by this server over LAN; output in the results dialog.');
         } catch (e) { console.log('pkgmanager sidebar install failed: ' + e); }
     };
 
-    // Compose the standard rights-checked runcommands action with reply: opens the
-    // pending/results dialog (this fork) and the device output comes back into it.
+    // Compose and run on ONE machine (per-device tab path).
     obj.pkgRunOn = function (n, pkgid) {
         try {
             var cat = window.pkgmanagerCatalog;
@@ -290,9 +332,11 @@ module.exports.pkgmanager = function (parent) {
             var os = pluginHandler.pkgmanager.pkgTargetOs(n);
             var def = pkg[os];
             if (def == null) { pluginHandler.pkgmanager.pkgMsg('This package has no install for this OS (' + os + ').'); return; }
+            var cmd = pluginHandler.pkgmanager.pkgCompose(pkg, def);
+            if (cmd == null) { pluginHandler.pkgmanager.pkgMsg('"' + pkg.name + '" (' + os + '): artifact missing in the server store.'); return; }
             var responseid = d2runBegin([n._id]);
-            meshserver.send({ action: 'runcommands', nodeids: [n._id], type: def.type, cmds: def.cmd, runAsUser: 0, reply: true, responseid: responseid, timeout: (def.timeout || 300) });
-            pluginHandler.pkgmanager.pkgMsg('Install of "' + pkg.name + '" started on ' + n.name + ' — output in the results dialog.');
+            meshserver.send({ action: 'runcommands', nodeids: [n._id], type: def.type, cmds: cmd, runAsUser: 0, reply: true, responseid: responseid, timeout: (def.timeout || 300) });
+            pluginHandler.pkgmanager.pkgMsg('Airgap install of "' + pkg.name + '" started on ' + n.name + ' — artifact served by this server over LAN; output in the results dialog.');
         } catch (e) { console.log('pkgmanager run failed: ' + e); }
     };
 
@@ -302,6 +346,61 @@ module.exports.pkgmanager = function (parent) {
     };
 
     // ---- Server-side ----
+    // AIRGAP STORE: artifacts are dropped manually on the server in
+    // <datapath>/plugins/pkgmanager/store/<package-id>/<artifact-file> and are
+    // served to the AGENT over the LAN via /pkgstore.ashx (token per process).
+    // Devices download from THIS server only — no internet is ever involved.
+    obj.dlToken = crypto.randomBytes(24).toString('hex');
+    obj.storePath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'store');
+    obj.artifactCache = {}; // "<pkgid>/<file>" -> { sha384, mtime }
+    try { parent.fs.mkdirSync(obj.storePath, { recursive: true }); } catch (e) { }
+
+    // Route registration follows the core pattern (webserver.js setupHTTPHandlers:
+    // callHook('hook_setupHttpHandlers', webserverObj, serverObj) -> obj.app).
+    obj.hook_setupHttpHandlers = function (webserver, server) {
+        try {
+            for (var i in server.config.domains) {
+                var d = server.config.domains[i];
+                if ((d.dns != null) || (d.share != null)) { continue; }
+                webserver.app.get(d.url + 'pkgstore.ashx', function (req, res) { obj.handleStoreGet(req, res); });
+            }
+            console.log('pkgmanager[server]: /pkgstore.ashx registered (airgap artifact route)');
+        } catch (e) { console.log('pkgmanager[server]: route registration failed: ' + e); }
+    };
+
+    obj.handleStoreGet = function (req, res) {
+        try {
+            if ((req.query == null) || (req.query.t !== obj.dlToken)) { res.status(403).send('Forbidden'); return; }
+            var p = String(req.query.p || '');
+            var full = parent.path.join(obj.storePath, p);
+            if ((full.indexOf(obj.storePath) !== 0) || (full == obj.storePath)) { res.status(400).send('Bad path'); return; }
+            parent.fs.stat(full, function (err, st) {
+                if ((err != null) || (!st.isFile())) { res.status(404).send('Not found'); return; }
+                res.setHeader('Content-Length', st.size);
+                res.setHeader('Content-Type', 'application/octet-stream');
+                parent.fs.createReadStream(full).pipe(res);
+            });
+        } catch (e) { try { res.status(500).send('Error'); } catch (e2) { } }
+    };
+
+    // SHA-384 + size of a store artifact (cached by mtime); flags artifactMissing.
+    obj.pkgArtifactInfo = function (pkgid, def, callback) {
+        var key = pkgid + '/' + def.artifact;
+        var full = parent.path.join(obj.storePath, pkgid, def.artifact);
+        parent.fs.stat(full, function (err, st) {
+            if ((err != null) || (!st.isFile())) { def.artifactMissing = true; delete def.sha384; callback(); return; }
+            var c = obj.artifactCache[key];
+            if ((c != null) && (c.mtime == st.mtimeMs)) { def.sha384 = c.sha384; def.artifactSize = st.size; def.artifactMissing = false; callback(); return; }
+            parent.fs.readFile(full, function (err2, data) {
+                if (err2 != null) { def.artifactMissing = true; delete def.sha384; callback(); return; }
+                var h = crypto.createHash('sha384').update(data).digest('hex');
+                obj.artifactCache[key] = { sha384: h, mtime: st.mtimeMs };
+                def.sha384 = h; def.artifactSize = st.size; def.artifactMissing = false;
+                callback();
+            });
+        });
+    };
+
     obj.serveraction = function (command, session, parent2) {
         console.log('pkgmanager[server]: serveraction ' + command.pluginaction + ' from user ' + command.userid);
         if (command.pluginaction == 'list') {
@@ -313,7 +412,27 @@ module.exports.pkgmanager = function (parent) {
                 // Template dispatcher (case 'plugin' on message.action) calls
                 // pluginHandler[message.plugin][message.method](server, message):
                 // plugin and method must be at the TOP level, not nested in event.
-                try { session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgList', catalog: cat, error: (err ? String(err) : null) }); } catch (e) { console.log('pkgmanager: reply failed: ' + e); }
+                var reply = function () {
+                    try { session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgList', catalog: cat, token: obj.dlToken, error: (err ? String(err) : null) }); } catch (e) { console.log('pkgmanager: reply failed: ' + e); }
+                };
+                if (cat == null) { reply(); return; }
+                // Enrich per-OS defs with artifact presence + SHA-384 from the store.
+                var oses = ['linux', 'windows', 'macos'];
+                var work = [];
+                for (var i = 0; i < (cat.packages != null ? cat.packages.length : 0); i++) {
+                    var p = cat.packages[i];
+                    for (var k = 0; k < oses.length; k++) {
+                        var def = p[oses[k]];
+                        if ((def != null) && (def.artifact != null)) { work.push({ pkgid: p.id, def: def }); }
+                    }
+                }
+                if (work.length == 0) { reply(); return; }
+                var done = 0;
+                for (var w = 0; w < work.length; w++) {
+                    (function (item) {
+                        obj.pkgArtifactInfo(item.pkgid, item.def, function () { done++; if (done == work.length) { reply(); } });
+                    })(work[w]);
+                }
             });
         }
     };
