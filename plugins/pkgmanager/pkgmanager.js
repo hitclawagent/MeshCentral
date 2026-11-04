@@ -1,5 +1,5 @@
 /**
- * MeshCentral Package Manager plugin ("pkgmanager") — v0.7.1.
+ * MeshCentral Package Manager plugin ("pkgmanager") — v0.8.0.
  *
  * Design: the catalog lives server-side (catalog.json next to this file).
  * The plugin pages are TABS IN THE TOP GRAY BAR (their own
@@ -18,8 +18,13 @@
  *   - "Gestione pacchetti" (full site admins only): catalog management —
  *     add / edit / delete packages and upload / delete airgap artifacts
  *     straight from the UI.
- *   - "Creazione pacchetti" (full site admins only): ENTRY ONLY for now
- *     (per the user request) — the guided package builder lands later.
+ *   - "Creazione pacchetti" (full site admins only): the GUIDED PACKAGE
+ *     BUILDER (v0.8.0) — base info, per-OS airgap presets (download from
+ *     this server over LAN + SHA-384 check + local install, chosen by
+ *     artifact extension), {{url}}/{{sha384}} insertion at the cursor,
+ *     artifact upload, duplicate-ID check, save into the catalog. The
+ *     form is NOT re-rendered on catalog replies (pkgCreateCatalogArrived
+ *     only updates hints/acks) so a half-filled form is never wiped.
  * The sidebar box opens the main page directly (no dropdown), and the
  * per-device "Plugins" tab (p19) keeps a single-device entry point.
  *
@@ -45,13 +50,13 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '0.7.2';
+    obj.version = '0.8.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -236,6 +241,7 @@ module.exports.pkgmanager = function (parent) {
             w.style.display = '';
             window.pkgmanagerView = 'create';
             window.pkgmanagerAdminMsg = '';
+            if (window.pkgmanagerCatalog == null) { meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'list' }); }
             pluginHandler.pkgmanager.pkgTabSetActive('create');
             var b = document.getElementById('LeftMenuPackages');
             if (b != null) b.style.opacity = '1';
@@ -247,10 +253,105 @@ module.exports.pkgmanager = function (parent) {
         try {
             var m = document.getElementById('pkgmanagerMain');
             if (m == null) return;
-            var x = '<div style="margin-bottom:8px;font-size:16px"><b>Creazione pacchetti</b></div>';
-            x += '<div style="color:#888;padding:8px 0">La creazione guidata dei pacchetti arriva nelle prossime versioni del plugin. Da qui potrai costruire un pacchetto (definizioni per OS, artefatti airgap, comando d\'installazione) e salvarlo nel catalogo.</div>';
+            var x = '<div style="margin-bottom:8px;font-size:16px"><b>Creazione pacchetti</b> — wizard guidato</div>';
+            x += '<div style="color:#888;padding:4px 0 10px 0">Costruisci un pacchetto airgap: informazioni di base, poi per ogni sistema operativo carica l\'artefatto e genera il comando con i preset (download dal server in LAN + verifica SHA-384 + installazione locale). Il device non usa internet.</div>';
+            x += '<div style="border:1px solid #ccc;border-radius:6px;padding:10px;margin-bottom:10px"><b>1 · Informazioni di base</b>';
+            x += '<table style="border-collapse:collapse;margin-top:6px">';
+            x += '<tr><td style="padding:4px">ID</td><td style="padding:4px"><input type=text id=pkgfId style=width:280px oninput="pluginHandler.pkgmanager.pkgCreateCheckId()"> <span id=pkgfIdHint style="color:#888"></span></td></tr>';
+            x += '<tr><td style="padding:4px">Nome</td><td style="padding:4px"><input type=text id=pkgfName style=width:280px></td></tr>';
+            x += '<tr><td style="padding:4px">Descrizione</td><td style="padding:4px"><input type=text id=pkgfDesc style=width:420px></td></tr>';
+            x += '</table></div>';
+            var osdefs = [['linux', 'Linux (type 3 · shell)'], ['windows', 'Windows (type 1 · cmd)'], ['macos', 'macOS (type 3 · shell)']];
+            for (var k = 0; k < osdefs.length; k++) {
+                var os = osdefs[k][0];
+                x += '<div style="border:1px solid #ccc;border-radius:6px;padding:10px;margin-bottom:10px"><b>2.' + (k + 1) + ' · ' + osdefs[k][1] + '</b>';
+                x += '<div style="padding:4px 0">Artefatto (file nello store): <input type=text id="pkgfArt_' + os + '" style=width:280px> <input type=button value="Carica artefatto…" onclick="pluginHandler.pkgmanager.pkgAdminUpload(\'' + os + '\')"> <input type=button value="Elimina artefatto" onclick="pluginHandler.pkgmanager.pkgAdminArtifactDel(\'' + os + '\')"></div>';
+                x += '<div style="padding:4px 0">Tipo: <select id="pkgfType_' + os + '"><option value=3 selected>Shell (Linux/macOS)</option><option value=1>cmd.exe (Windows)</option><option value=2>PowerShell (Windows)</option></select> · Timeout (s): <input type=text id="pkgfTo_' + os + '" style=width:70px value=300></div>';
+                x += '<div style="padding:4px 0">Comando: <input type=button value="Preset airgap" onclick="pluginHandler.pkgmanager.pkgCreatePreset(\'' + os + '\')"> <input type=button value="Inserisci {{url}}" onclick="pluginHandler.pkgmanager.pkgCreateInsert(\'' + os + '\', \'url\')"> <input type=button value="Inserisci {{sha384}}" onclick="pluginHandler.pkgmanager.pkgCreateInsert(\'' + os + '\', \'sha384\')"></div>';
+                x += '<textarea id="pkgfCmd_' + os + '" style="width:640px;height:64px;font-family:monospace"></textarea></div>';
+            }
+            x += '<div style="border:1px solid #ccc;border-radius:6px;padding:10px;margin-bottom:10px"><b>3 · Salva</b> <span style="color:#888">— il pacchetto comparirà in «Installazione pacchetti» e in «Gestione pacchetti»</span></div>';
+            x += '<div style="margin-top:6px"><input type=button value="Salva pacchetto" onclick="pluginHandler.pkgmanager.pkgAdminSave(true)"> <input type=file id="pkgfFile" style="display:none"></div>';
+            x += '<div id="pkgadminStatus" style="margin-top:6px;color:#888"></div>';
             m.innerHTML = x;
         } catch (e) { console.log('pkgmanager create render failed: ' + e); }
+    };
+
+    // Airgap command preset for one OS, chosen by the artifact extension:
+    // download from THIS server over LAN ({{url}}), SHA-384 verification
+    // ({{sha384}}), then the local install step. The generated command is a
+    // starting point — the admin can edit it before saving.
+    obj.pkgCreatePreset = function (os) {
+        try {
+            var art = Q('pkgfArt_' + os).value.trim();
+            var a = (art != '') ? art : 'pacchetto';
+            var ext = a.slice(a.lastIndexOf('.') + 1).toLowerCase();
+            var cmd = '';
+            if (os == 'linux') {
+                var inst = 'sh /tmp/' + a;
+                if (ext == 'deb') { inst = 'sudo -n dpkg -i /tmp/' + a; }
+                else if (ext == 'rpm') { inst = 'sudo -n rpm -Uvh --force /tmp/' + a; }
+                else if (ext == 'apk') { inst = 'sudo -n apk add --allow-untrusted /tmp/' + a; }
+                cmd = "curl -kfsSL -o /tmp/" + a + " '{{url}}' && echo '{{sha384}}  /tmp/" + a + "' | sha384sum -c - && " + inst;
+                Q('pkgfType_linux').value = '3';
+            } else if (os == 'windows') {
+                var inst = '"%TEMP%\\' + a + '" /S';
+                if (ext == 'msi') { inst = 'msiexec /i "%TEMP%\\' + a + '" /qn'; }
+                cmd = 'curl -kfsSL -o "%TEMP%\\' + a + '" "{{url}}" && certutil -hashfile "%TEMP%\\' + a + '" SHA384 | findstr /i "{{sha384}}" && ' + inst;
+                Q('pkgfType_windows').value = '1';
+            } else {
+                var inst = 'sh /tmp/' + a;
+                if (ext == 'pkg') { inst = 'sudo -n installer -pkg /tmp/' + a + ' -target /'; }
+                else if (ext == 'app') { inst = 'cp -R /tmp/' + a + ' /Applications/'; }
+                cmd = "curl -kfsSL -o /tmp/" + a + " '{{url}}' && echo '{{sha384}}  /tmp/" + a + "' | shasum -a 384 -c - && " + inst;
+                Q('pkgfType_macos').value = '3';
+            }
+            Q('pkgfCmd_' + os).value = cmd;
+            pluginHandler.pkgmanager.pkgAdminStatus('Preset ' + os + ' generato' + ((art == '') ? ' (nome artefatto vuoto: usato "pacchetto" — compila il campo e rigenera per il nome giusto)' : ' (' + EscapeHtml(art) + ')') + '. Controlla il comando prima di salvare.');
+        } catch (e) { pluginHandler.pkgmanager.pkgAdminStatus('Preset fallito: ' + e); }
+    };
+
+    // Insert {{url}} / {{sha384}} at the textarea cursor (not appended).
+    obj.pkgCreateInsert = function (os, which) {
+        try {
+            var t = Q('pkgfCmd_' + os);
+            var ph = (which == 'url') ? '{{url}}' : '{{sha384}}';
+            var st = t.selectionStart; if (st == null) { st = t.value.length; }
+            var en = t.selectionEnd; if (en == null) { en = st; }
+            t.value = t.value.slice(0, st) + ph + t.value.slice(en);
+            t.focus();
+            t.selectionStart = (t.selectionEnd = (st + ph.length));
+        } catch (e) { }
+    };
+
+    // Live ID check: pattern + duplicates against the current catalog.
+    obj.pkgCreateCheckId = function () {
+        try {
+            var h = document.getElementById('pkgfIdHint');
+            if (h == null) return;
+            var pid = Q('pkgfId').value.trim();
+            if (pid == '') { h.innerText = ''; return; }
+            if (!/^[a-zA-Z0-9._-]+$/.test(pid)) { h.innerText = 'ID non valido (lettere, numeri, . _ -)'; h.style.color = '#a60'; return; }
+            var cat = window.pkgmanagerCatalog;
+            var dup = false;
+            for (var i = 0; i < ((cat != null) ? cat.packages.length : 0); i++) { if (cat.packages[i].id == pid) { dup = true; break; } }
+            if (dup) { h.innerText = 'ID già esistente — salvando lo AGGIORNERAI (per modifiche usa «Gestione pacchetti»)'; h.style.color = '#a60'; }
+            else if (cat == null) { h.innerText = 'Verifica catalogo… (in arrivo)'; h.style.color = '#888'; }
+            else { h.innerText = 'ID libero ✓'; h.style.color = '#080'; }
+        } catch (e) { }
+    };
+
+    // Catalog reply while the wizard is open: update ONLY acks and hints —
+    // never re-render the form (a half-filled form must not be wiped).
+    obj.pkgCreateCatalogArrived = function () {
+        try {
+            if ((window.pkgmanagerAdminMsg != null) && (window.pkgmanagerAdminMsg != '')) {
+                var st = document.getElementById('pkgadminStatus');
+                if (st != null) { st.innerText = window.pkgmanagerAdminMsg; st.style.color = '#080'; }
+                window.pkgmanagerAdminMsg = '';
+            }
+            pluginHandler.pkgmanager.pkgCreateCheckId();
+        } catch (e) { }
     };
 
     obj.pkgAdminRender = function () {
@@ -529,7 +630,7 @@ module.exports.pkgmanager = function (parent) {
                 }
             }
             if (window.pkgmanagerView == 'admin') { pluginHandler.pkgmanager.pkgAdminRender(); }
-            else if (window.pkgmanagerView == 'create') { pluginHandler.pkgmanager.pkgCreateRender(); }
+            else if (window.pkgmanagerView == 'create') { pluginHandler.pkgmanager.pkgCreateCatalogArrived(); }
             else { pluginHandler.pkgmanager.pkgSidebarRender(); }
         } catch (e) { console.log('pkgmanager render failed: ' + e); }
     };
@@ -539,7 +640,7 @@ module.exports.pkgmanager = function (parent) {
         try {
             window.pkgmanagerAdminMsg = ((message != null) && (message.msg != null)) ? message.msg : 'Operazione negata.';
             if (window.pkgmanagerView == 'admin') { pluginHandler.pkgmanager.pkgAdminRender(); }
-            else if (window.pkgmanagerView == 'create') { pluginHandler.pkgmanager.pkgCreateRender(); }
+            else if (window.pkgmanagerView == 'create') { pluginHandler.pkgmanager.pkgCreateCatalogArrived(); }
             else { pluginHandler.pkgmanager.pkgMsg(window.pkgmanagerAdminMsg); }
             console.log('pkgmanager: negato: ' + window.pkgmanagerAdminMsg);
         } catch (e) { }
