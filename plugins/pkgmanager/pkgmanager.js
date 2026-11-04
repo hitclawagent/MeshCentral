@@ -1,5 +1,5 @@
 /**
- * MeshCentral Package Manager plugin ("pkgmanager") — v0.9.0.
+ * MeshCentral Package Manager plugin ("pkgmanager") — v0.9.1.
  *
  * Design: the catalog lives server-side (catalog.json next to this file).
  * The plugin pages are TABS IN THE TOP GRAY BAR (their own
@@ -26,7 +26,9 @@
  *     cursor, artifact upload, live ID check. Save MERGES: drafted defs +
  *     defs already saved for that ID (the wizard never silently drops a
  *     saved OS). Catalog replies only update hints/acks, never re-render
- *     the form.
+ *     the form. v0.9.1: the management Add/Edit form uses the SAME
+ *     single-form pattern (OS dropdown + its own per-OS drafts + merge
+ *     save) — "Modifica" no longer shows one section per OS.
  * The sidebar box opens the main page directly (no dropdown), and the
  * per-device "Plugins" tab (p19) keeps a single-device entry point.
  *
@@ -52,13 +54,13 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '0.9.0';
+    obj.version = '0.9.1';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -428,7 +430,8 @@ module.exports.pkgmanager = function (parent) {
             }
             Q('pkgfCmd').value = cmd;
             pluginHandler.pkgmanager.pkgCreateDraftSync();
-            pluginHandler.pkgmanager.pkgCreateOsHint();
+            pluginHandler.pkgmanager.pkgAdminDraftSync();
+            if (window.pkgmanagerView == 'admin') { pluginHandler.pkgmanager.pkgAdminOsHint(); } else { pluginHandler.pkgmanager.pkgCreateOsHint(); }
             pluginHandler.pkgmanager.pkgAdminStatus('Preset ' + os + ' generato' + ((art == '') ? ' (nome artefatto vuoto: usato "pacchetto" — compila il campo e rigenera per il nome giusto)' : ' (' + EscapeHtml(art) + ')') + '. Controlla il comando prima di salvare.');
         } catch (e) { pluginHandler.pkgmanager.pkgAdminStatus('Preset fallito: ' + e); }
     };
@@ -444,6 +447,7 @@ module.exports.pkgmanager = function (parent) {
             t.focus();
             t.selectionStart = (t.selectionEnd = (st + ph.length));
             pluginHandler.pkgmanager.pkgCreateDraftSync();
+            pluginHandler.pkgmanager.pkgAdminDraftSync();
         } catch (e) { }
     };
 
@@ -525,6 +529,63 @@ module.exports.pkgmanager = function (parent) {
         } catch (e) { console.log('pkgmanager admin edit failed: ' + e); }
     };
 
+    // ---- v0.9.1 management single-form state (same pattern as the builder,
+    // SEPARATE draft so the wizard flow can never pollute it and vice versa) ----
+    obj.pkgAdminCurOs = function () { try { return String(Q('pkgfOs').value || 'linux'); } catch (e) { return 'linux'; } };
+    obj.pkgAdminFieldSync = function (os) {
+        try {
+            if (window.pkgmanagerAdminDraft == null) { window.pkgmanagerAdminDraft = {}; }
+            window.pkgmanagerAdminDraft[os] = { art: Q('pkgfArt').value.trim(), type: String(Q('pkgfType').value), to: Q('pkgfTo').value.trim(), cmd: Q('pkgfCmd').value };
+        } catch (e) { }
+    };
+    // Sync the CURRENT-OS fields into the management draft. Management-only:
+    // a no-op outside the admin view (the builder draft stays untouched).
+    obj.pkgAdminDraftSync = function () {
+        try {
+            if (window.pkgmanagerView !== 'admin') return;
+            pluginHandler.pkgmanager.pkgAdminFieldSync(pluginHandler.pkgmanager.pkgAdminCurOs());
+        } catch (e) { }
+    };
+    obj.pkgAdminOsChange = function () {
+        try {
+            var prev = window.pkgmanagerAdminDraftOs || 'linux';
+            pluginHandler.pkgmanager.pkgAdminFieldSync(prev);
+            var os = pluginHandler.pkgmanager.pkgAdminCurOs();
+            var d = ((window.pkgmanagerAdminDraft != null) ? window.pkgmanagerAdminDraft[os] : null);
+            Q('pkgfArt').value = ((d != null) ? (d.art || '') : '');
+            Q('pkgfType').value = ((d != null) && (d.type != null)) ? d.type : pluginHandler.pkgmanager.pkgCreateDefaultType(os);
+            Q('pkgfTo').value = ((d != null) && (d.to != null)) ? d.to : '300';
+            Q('pkgfCmd').value = ((d != null) && (d.cmd != null)) ? d.cmd : '';
+            window.pkgmanagerAdminDraftOs = os;
+            pluginHandler.pkgmanager.pkgAdminOsHint();
+        } catch (e) { }
+    };
+    obj.pkgAdminOsHint = function () {
+        try {
+            var h = document.getElementById('pkgfOsHint');
+            if (h == null) return;
+            var pid = Q('pkgfId').value.trim();
+            var saved = {};
+            var cat = window.pkgmanagerCatalog;
+            for (var i = 0; i < ((cat != null) ? cat.packages.length : 0); i++) { if (cat.packages[i].id == pid) { var p = cat.packages[i]; if (p.linux != null) { saved.linux = p.linux; } if (p.windows != null) { saved.windows = p.windows; } if (p.macos != null) { saved.macos = p.macos; } break; } }
+            var parts = [];
+            var oses = [['linux', 'Linux'], ['windows', 'Windows'], ['macos', 'macOS']];
+            for (var k = 0; k < oses.length; k++) {
+                var os = oses[k][0];
+                var d = ((window.pkgmanagerAdminDraft != null) ? window.pkgmanagerAdminDraft[os] : null);
+                if ((d != null) && (d.cmd != null) && (d.cmd != '')) {
+                    // A draft that still MATCHES the saved def (just loaded into
+                    // the form for editing) is 'salvato'; only real edits are 'bozza'.
+                    var sd = saved[os];
+                    var same = (sd != null) && (String(d.cmd) == String(sd.cmd || '')) && (String(d.art || '') == String(sd.artifact || '')) && (String(d.type) == String(sd.type)) && (String(parseInt(d.to) || '') == String(sd.timeout || ''));
+                    parts.push(oses[k][1] + (same ? ': salvato' : ': bozza'));
+                }
+                else if (saved[os] != null) { parts.push(oses[k][1] + ': salvato'); }
+            }
+            h.innerText = parts.length ? ('Definizioni: ' + parts.join(' · ')) : '';
+        } catch (e) { }
+    };
+
     obj.pkgAdminForm = function (pkg) {
         try {
             var m = document.getElementById('pkgmanagerMain');
@@ -536,19 +597,35 @@ module.exports.pkgmanager = function (parent) {
             x += '<tr><td style="padding:4px">Nome</td><td style="padding:4px"><input type=text id=pkgfName style=width:280px value="' + EscapeHtml(isNew ? '' : (pkg.name || '')) + '"></td></tr>';
             x += '<tr><td style="padding:4px">Descrizione</td><td style="padding:4px"><input type=text id=pkgfDesc style=width:420px value="' + EscapeHtml(isNew ? '' : (pkg.description || '')) + '"></td></tr>';
             x += '</table>';
+            // v0.9.1 single form: per-OS drafts seeded from the package, the OS
+            // dropdown swaps the fields (same pattern as the builder).
+            var draft = {};
             var oses = [['linux', 'Linux'], ['windows', 'Windows'], ['macos', 'macOS']];
+            var osCur = '';
             for (var k = 0; k < oses.length; k++) {
                 var os = oses[k][0];
-                var def = (isNew ? null : pkg[os]);
-                x += '<div style="margin-top:14px;border-top:1px solid #eee;padding-top:8px"><b>' + oses[k][1] + '</b></div>';
-                x += '<div style="padding:2px 0">Tipo: <select id="pkgfType_' + os + '"><option value=3' + ((((def == null) || (def.type == 3)) ? ' selected' : '')) + '>Shell (Linux/macOS)</option><option value=1' + (((def != null) && (def.type == 1)) ? ' selected' : '') + '>cmd.exe (Windows)</option><option value=2' + (((def != null) && (def.type == 2)) ? ' selected' : '') + '>PowerShell (Windows)</option></select></div>';
-                x += '<div style="padding:2px 0">Artefatto (file nello store): <input type=text id="pkgfArt_' + os + '" style=width:280px value="' + EscapeHtml(((def != null) && (def.artifact != null)) ? def.artifact : '') + '"> <input type=button value="Carica artefatto…" onclick="pluginHandler.pkgmanager.pkgAdminUpload(\'' + os + '\')"> <input type=button value="Elimina artefatto" onclick="pluginHandler.pkgmanager.pkgAdminArtifactDel(\'' + os + '\')"></div>';
-                x += '<div style="padding:2px 0">Timeout (s): <input type=text id="pkgfTo_' + os + '" style=width:80px value="' + EscapeHtml(((def != null) && (def.timeout != null)) ? String(def.timeout) : '300') + '"></div>';
-                x += '<div style="padding:2px 0">Comando (segnaposto {{url}} e {{sha384}}):<br><textarea id="pkgfCmd_' + os + '" style="width:640px;height:70px;font-family:monospace">' + EscapeHtml((def != null) ? String(def.cmd || '') : '') + '</textarea></div>';
+                var def = ((pkg != null) ? pkg[os] : null);
+                if (def != null) {
+                    draft[os] = { art: ((def.artifact != null) ? String(def.artifact) : ''), type: String(def.type), to: ((def.timeout != null) ? String(def.timeout) : '300'), cmd: String(def.cmd || '') };
+                    if (osCur == '') { osCur = os; }
+                }
             }
+            if (osCur == '') { osCur = 'linux'; }
+            window.pkgmanagerAdminDraft = draft;
+            window.pkgmanagerAdminDraftOs = osCur;
+            var d0 = draft[osCur];
+            x += '<tr><td style="padding:4px">Sistema operativo</td><td style="padding:4px"><select id=pkgfOs onchange="pluginHandler.pkgmanager.pkgAdminOsChange()">';
+            for (var k2 = 0; k2 < oses.length; k2++) { x += '<option value="' + oses[k2][0] + '"' + ((oses[k2][0] == osCur) ? ' selected' : '') + '>' + oses[k2][1] + '</option>'; }
+            x += '</select> <span id=pkgfOsHint style="color:#888"></span></td></tr>';
+            x += '<tr><td style="padding:4px">Artefatto (file nello store)</td><td style="padding:4px"><input type=text id=pkgfArt style=width:280px oninput="pluginHandler.pkgmanager.pkgAdminDraftSync()" value="' + EscapeHtml(((d0 != null) ? (d0.art || '') : '')) + '"> <input type=button value="Carica artefatto…" onclick="pluginHandler.pkgmanager.pkgAdminUpload()"> <input type=button value="Elimina artefatto" onclick="pluginHandler.pkgmanager.pkgAdminArtifactDel()"></td></tr>';
+            x += '<tr><td style="padding:4px">Tipo comando</td><td style="padding:4px"><select id=pkgfType onchange="pluginHandler.pkgmanager.pkgAdminDraftSync()"><option value=3' + (((d0 == null) || (d0.type == '3')) ? ' selected' : '') + '>Shell (Linux/macOS)</option><option value=1' + (((d0 != null) && (d0.type == '1')) ? ' selected' : '') + '>cmd.exe (Windows)</option><option value=2' + (((d0 != null) && (d0.type == '2')) ? ' selected' : '') + '>PowerShell (Windows)</option></select> · Timeout (s): <input type=text id=pkgfTo style=width:70px value="' + EscapeHtml(((d0 != null) && (d0.to != null)) ? d0.to : '300') + '" oninput="pluginHandler.pkgmanager.pkgAdminDraftSync()"></td></tr>';
+            x += '</table>';
+            x += '<div style="padding:4px 0">Comando: <input type=button value="Preset airgap" onclick="pluginHandler.pkgmanager.pkgCreatePreset()"> <input type=button value="Inserisci {{url}}" onclick="pluginHandler.pkgmanager.pkgCreateInsert(\'url\')"> <input type=button value="Inserisci {{sha384}}" onclick="pluginHandler.pkgmanager.pkgCreateInsert(\'sha384\')"></div>';
+            x += '<textarea id=pkgfCmd style="width:640px;height:80px;font-family:monospace" oninput="pluginHandler.pkgmanager.pkgAdminDraftSync()">' + EscapeHtml(((d0 != null) ? (d0.cmd || '') : '')) + '</textarea></div>';
             x += '<div style="margin-top:10px"><input type=button value="Salva" onclick="pluginHandler.pkgmanager.pkgAdminSave(' + (isNew ? 'true' : 'false') + ')"> <input type=button value="Annulla" onclick="pluginHandler.pkgmanager.pkgAdminRender()"> <input type=file id="pkgfFile" style="display:none"></div>';
             x += '<div id="pkgadminStatus" style="margin-top:6px;color:#888"></div>';
             m.innerHTML = x;
+            pluginHandler.pkgmanager.pkgAdminOsHint();
         } catch (e) { console.log('pkgmanager admin form failed: ' + e); }
     };
 
@@ -562,6 +639,7 @@ module.exports.pkgmanager = function (parent) {
 
     obj.pkgAdminUpload = function (os) {
         try {
+            if (os == null) { os = pluginHandler.pkgmanager.pkgAdminCurOs(); } // v0.9.1 single-form management
             var f = document.getElementById('pkgfFile');
             if (f == null) return;
             f.value = '';
@@ -588,7 +666,7 @@ module.exports.pkgmanager = function (parent) {
                 fetch('/pkgstore.ashx?op=upload&p=' + encodeURIComponent(pid + '/' + art), { method: 'POST', body: buf, headers: { 'Content-Type': 'application/octet-stream' } })
                     .then(function (r) { return r.json(); })
                     .then(function (j) {
-                        if (j.ok) { pluginHandler.pkgmanager.pkgCreateDraftSync(); pluginHandler.pkgmanager.pkgAdminStatus('Artefatto caricato: ' + art + ' (' + j.size + ' byte, sha384 ' + String(j.sha384).slice(0, 12) + '…). Salva per aggiornare il catalogo.'); }
+                        if (j.ok) { pluginHandler.pkgmanager.pkgCreateDraftSync(); pluginHandler.pkgmanager.pkgAdminDraftSync(); pluginHandler.pkgmanager.pkgAdminStatus('Artefatto caricato: ' + art + ' (' + j.size + ' byte, sha384 ' + String(j.sha384).slice(0, 12) + '…). Salva per aggiornare il catalogo.'); }
                         else { pluginHandler.pkgmanager.pkgAdminStatus('Upload negato: ' + EscapeHtml(String(j.error || '')) + ' (serve amministratore del server).'); }
                     })
                     .catch(function (e2) { pluginHandler.pkgmanager.pkgAdminStatus('Upload fallito: ' + e2); });
@@ -598,6 +676,7 @@ module.exports.pkgmanager = function (parent) {
 
     obj.pkgAdminArtifactDel = function (os) {
         try {
+            if (os == null) { os = pluginHandler.pkgmanager.pkgAdminCurOs(); } // v0.9.1 single-form management
             var pid = Q('pkgfId').value.trim();
             var artInput = document.getElementById('pkgfArt_' + os);
             if (artInput == null) { artInput = document.getElementById('pkgfArt'); } // v0.9.0 single-form wizard
@@ -607,7 +686,7 @@ module.exports.pkgmanager = function (parent) {
             fetch('/pkgstore.ashx?op=del&p=' + encodeURIComponent(pid + '/' + art), { method: 'POST' })
                 .then(function (r) { return r.json(); })
                 .then(function (j) {
-                    if (j.ok) { artInput.value = ''; pluginHandler.pkgmanager.pkgCreateDraftSync(); }
+                    if (j.ok) { artInput.value = ''; pluginHandler.pkgmanager.pkgCreateDraftSync(); pluginHandler.pkgmanager.pkgAdminDraftSync(); }
                     pluginHandler.pkgmanager.pkgAdminStatus(j.ok ? 'Artefatto eliminato dallo store: ' + art : 'Eliminazione fallita: ' + EscapeHtml(String(j.error || '')));
                 })
                 .catch(function (e2) { pluginHandler.pkgmanager.pkgAdminStatus('Eliminazione fallita: ' + e2); });
@@ -618,22 +697,39 @@ module.exports.pkgmanager = function (parent) {
         try {
             var pid = Q('pkgfId').value.trim();
             if (!/^[a-zA-Z0-9._-]+$/.test(pid)) { pluginHandler.pkgmanager.pkgAdminStatus('ID non valido (lettere, numeri, . _ -).'); return; }
-            var pkg = { id: pid, name: Q('pkgfName').value.trim(), description: Q('pkgfDesc').value };
-            if (pkg.name == '') { pluginHandler.pkgmanager.pkgAdminStatus('Nome mancante.'); return; }
-            var oses = ['linux', 'windows', 'macos'];
-            for (var k = 0; k < oses.length; k++) {
-                var os = oses[k];
-                var cmd = Q('pkgfCmd_' + os).value.trim();
-                if (cmd == '') continue;
-                var def = { type: parseInt(Q('pkgfType_' + os).value), cmd: cmd };
-                var to = parseInt(Q('pkgfTo_' + os).value); if (to > 0) { def.timeout = to; }
-                var art = Q('pkgfArt_' + os).value.trim();
-                if (art != '') { def.artifact = art; }
-                pkg[os] = def;
+            var name = Q('pkgfName').value.trim();
+            if (name == '') { pluginHandler.pkgmanager.pkgAdminStatus('Nome mancante.'); return; }
+            // v0.9.1 single form: current fields + per-OS drafts, MERGED with
+            // the defs already saved for this ID (an untouched saved OS must
+            // survive the server-side replace-on-id save).
+            pluginHandler.pkgmanager.pkgAdminFieldSync(pluginHandler.pkgmanager.pkgAdminCurOs());
+            var pkg = { id: pid, name: name, description: Q('pkgfDesc').value };
+            for (var k in window.pkgmanagerAdminDraft) {
+                var d = window.pkgmanagerAdminDraft[k];
+                if ((k == 'linux') || (k == 'windows') || (k == 'macos')) {
+                    if ((d != null) && (d.cmd != null) && (d.cmd.trim() != '')) {
+                        var def = { type: (parseInt(d.type) || pluginHandler.pkgmanager.pkgCreateDefaultType(k)), cmd: d.cmd.trim() };
+                        var to = parseInt(d.to); if (to > 0) { def.timeout = to; }
+                        if ((d.art != null) && (d.art.trim() != '')) { def.artifact = d.art.trim(); }
+                        pkg[k] = def;
+                    }
+                }
             }
-            if ((pkg.linux == null) && (pkg.windows == null) && (pkg.macos == null)) { pluginHandler.pkgmanager.pkgAdminStatus('Serve almeno un comando per OS.'); return; }
+            var cat = window.pkgmanagerCatalog;
+            for (var i = 0; i < ((cat != null) ? cat.packages.length : 0); i++) {
+                if (cat.packages[i].id == pid) {
+                    var oses2 = ['linux', 'windows', 'macos'];
+                    for (var j = 0; j < oses2.length; j++) {
+                        var o2 = oses2[j];
+                        if ((pkg[o2] == null) && (cat.packages[i][o2] != null)) { pkg[o2] = cat.packages[i][o2]; }
+                    }
+                    break;
+                }
+            }
+            if ((pkg.linux == null) && (pkg.windows == null) && (pkg.macos == null)) { pluginHandler.pkgmanager.pkgAdminStatus('Compila il comando per il sistema operativo selezionato prima di salvare.'); return; }
             meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'save', pkg: pkg });
             pluginHandler.pkgmanager.pkgAdminStatus('Salvataggio…');
+            pluginHandler.pkgmanager.pkgAdminOsHint();
         } catch (e) { pluginHandler.pkgmanager.pkgAdminStatus('Errore: ' + e); }
     };
 
