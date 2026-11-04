@@ -1,5 +1,5 @@
 /**
- * MeshCentral Package Manager plugin ("pkgmanager") — v1.0.0.
+ * MeshCentral Package Manager plugin ("pkgmanager") — v1.1.0.
  *
  * Design: the catalog lives server-side (catalog.json next to this file).
  * The plugin pages are TABS IN THE TOP GRAY BAR (their own
@@ -29,12 +29,16 @@
  *     the form. v0.9.1: the management Add/Edit form uses the SAME
  *     single-form pattern (OS dropdown + its own per-OS drafts + merge
  *     save) — "Modifica" no longer shows one section per OS.
- *   - "My Files" (p5) shows the PLUGIN STORE PATH too (v1.0.0): the
- *     server sends the absolute store dir in the catalog reply and
- *     entering p5 injects a subtle line under the title with the path
- *     (plus per-package subdir and the LAN download route); leaving p5
- *     removes it. Core elements are untouched (#p5rightOfButtons is the
- *     quota bar: the line goes inside #p5title).
+ *   - "My Files" shows the store as a NAVIGABLE FOLDER (v1.1.0, user
+ *     request: "come la voce MyFiles/Public che ha di default"): a
+ *     symlink "Pacchetti (pkgmanager)" -> store is created inside the My
+ *     Files area of every FULL SITE ADMIN at server startup (junction
+ *     type: works on Windows too without admin rights). The core file
+ *     tree follows symlinks (readFilesRec uses statSync), so admins
+ *     browse/download artifacts with ZERO core changes; non-admins never
+ *     get the link and stale links are cleaned up. Deleting the link
+ *     non-recursively removes just the link; the plugin recreates both
+ *     the store dir and the link at every startup.
  * The sidebar box opens the main page directly (no dropdown), and the
  * per-device "Plugins" tab (p19) keeps a single-device entry point.
  *
@@ -60,13 +64,13 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '1.0.0';
+    obj.version = '1.1.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgStorePathShow', 'pkgStorePathHide', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -178,32 +182,6 @@ module.exports.pkgmanager = function (parent) {
     // for the core, yet would tear this page down. Mirror the core guard: with a
     // modal open keep the plugin page; a real navigation (modal closed) still
     // tears it down.
-    // v1.0.0 — "My Files" store-path line. Injected INSIDE #p5title (the core
-    // uses #p5rightOfButtons for the quota bar: untouched). Removed on leave.
-    obj.pkgStorePathShow = function () {
-        try {
-            if (document.getElementById('pkgmanagerStorePathInfo') != null) return;
-            var t = document.getElementById('p5title');
-            if (t == null) return;
-            var d = document.createElement('div');
-            d.id = 'pkgmanagerStorePathInfo';
-            d.style.cssText = 'color:#888;font-size:12px;margin:4px 0 2px 0;font-family:Arial,Helvetica,sans-serif';
-            var p = window.pkgmanagerStorePath;
-            if (p == null) {
-                d.innerHTML = 'pkgmanager — percorso dello store artefatti: in arrivo dal server…';
-            } else {
-                d.innerHTML = 'pkgmanager — artefatti airgap salvati sul server in: <b style="font-family:monospace">' + EscapeHtml(p) + '</b> · per pacchetto: <span style="font-family:monospace">' + EscapeHtml(p) + '/&lt;id-pacchetto&gt;/</span> · i device scaricano da <span style="font-family:monospace">' + EscapeHtml(location.origin) + '/pkgstore.ashx</span> in LAN';
-            }
-            t.appendChild(d);
-        } catch (e) { }
-    };
-    obj.pkgStorePathHide = function () {
-        try {
-            var d = document.getElementById('pkgmanagerStorePathInfo');
-            if (d != null) { d.remove(); }
-        } catch (e) { }
-    };
-
     obj.goPageStart = function (x, event) {
         try {
             if ((typeof xxdialogMode !== 'undefined') && xxdialogMode) return; // core would no-op this go()
@@ -213,8 +191,6 @@ module.exports.pkgmanager = function (parent) {
             if (w != null) w.style.display = 'none';
             var b = document.getElementById('LeftMenuPackages');
             if (b != null) b.style.opacity = '';
-            // v1.0.0: "My Files" (p5) also shows the plugin store path.
-            if (x == 5) { pluginHandler.pkgmanager.pkgStorePathShow(); } else { pluginHandler.pkgmanager.pkgStorePathHide(); }
         } catch (e) { }
     };
 
@@ -878,7 +854,6 @@ module.exports.pkgmanager = function (parent) {
         try {
             window.pkgmanagerCatalog = message.catalog;
             window.pkgmanagerToken = message.token;
-            if (message.storePath != null) { window.pkgmanagerStorePath = String(message.storePath); }
             if (message.opAck != null) { window.pkgmanagerAdminMsg = message.opAck; }
             pluginHandler.pkgmanager.pkgTabSetActive(window.pkgmanagerView);
             var cat = window.pkgmanagerCatalog;
@@ -1042,6 +1017,54 @@ module.exports.pkgmanager = function (parent) {
     obj.webRef = null;      // webserver module ref (session users), set by the hook
     try { parent.fs.mkdirSync(obj.storePath, { recursive: true }); } catch (e) { }
 
+    // ---- v1.1.0: the store as a NAVIGABLE FOLDER in "My Files" ----
+    // Symlink "Pacchetti (pkgmanager)" -> store inside the My Files area of
+    // every FULL SITE ADMIN. The core tree follows symlinks (readFilesRec
+    // statSync), so the folder is browsable + downloadable via the standard
+    // downloadfile.ashx with ZERO core changes. Non-admins never get the
+    // link; stale links (admin rights revoked) are removed. A real file/dir
+    // the user made with the same name is NEVER touched. Non-recursive
+    // delete of the link removes only the link; the plugin recreates both
+    // the store dir and the link at every startup.
+    obj.storeLinkName = 'Pacchetti (pkgmanager)';
+    obj.syncStoreLinks = function () {
+        try {
+            var db = parent.parent.db;
+            if ((db == null) || (typeof db.GetAllType != 'function')) { return; }
+            db.GetAllType('user', function (err, docs) {
+                if (err != null) { console.log('pkgmanager[server]: user scan failed: ' + err); return; }
+                if (docs == null) { return; }
+                for (var i = 0; i < docs.length; i++) {
+                    var u = docs[i];
+                    if ((u == null) || (u._id == null)) { continue; }
+                    var isAdmin = (u.siteadmin === 0xFFFFFFFF);
+                    var us = String(u._id).split('/');
+                    var domainx = ((us[1] != null) && (us[1].length > 0)) ? ('domain-' + us[1]) : 'domain';
+                    var userdir = parent.path.join(parent.parent.filespath, domainx, 'user-' + us[2]);
+                    var link = parent.path.join(userdir, obj.storeLinkName);
+                    try { parent.fs.mkdirSync(userdir, { recursive: true }); } catch (e) { }
+                    var st = null;
+                    try { st = parent.fs.lstatSync(link); } catch (e) { }
+                    if (st != null) {
+                        // Never touch a real (non-symlink) item the user made.
+                        if (st.isSymbolicLink() !== true) { continue; }
+                        try { parent.fs.unlinkSync(link); } catch (e) { }
+                    }
+                    if (isAdmin) {
+                        try { parent.fs.symlinkSync(obj.storePath, link, 'junction'); }
+                        catch (e) { console.log('pkgmanager[server]: store link failed for ' + u._id + ': ' + e); }
+                    }
+                }
+            });
+        } catch (e) { console.log('pkgmanager[server]: syncStoreLinks failed: ' + e); }
+    };
+    // callHook('server_startup') fires after the DB is assigned: the links
+    // exist before any admin can log in and browse "My Files".
+    obj.server_startup = function () {
+        try { parent.fs.mkdirSync(obj.storePath, { recursive: true }); } catch (e) { }
+        obj.syncStoreLinks();
+    };
+
     // Route registration follows the core pattern (webserver.js setupHTTPHandlers:
     // callHook('hook_setupHttpHandlers', webserverObj, serverObj) -> obj.app).
     obj.hook_setupHttpHandlers = function (webserver, server) {
@@ -1147,7 +1170,7 @@ module.exports.pkgmanager = function (parent) {
             // pluginHandler[message.plugin][message.method](server, message):
             // plugin and method must be at the TOP level, not nested in event.
             var send = function () {
-                try { session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgList', catalog: cat, token: obj.dlToken, storePath: obj.storePath, opAck: opAck, error: (err2 ? String(err2) : (err || null)) }); } catch (e) { console.log('pkgmanager: reply failed: ' + e); }
+                try { session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgList', catalog: cat, token: obj.dlToken, opAck: opAck, error: (err2 ? String(err2) : (err || null)) }); } catch (e) { console.log('pkgmanager: reply failed: ' + e); }
             };
             if ((cat == null) || (cat.packages == null)) { send(); return; }
             var oses = ['linux', 'windows', 'macos'];
