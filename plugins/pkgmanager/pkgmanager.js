@@ -1,5 +1,5 @@
 /**
- * MeshCentral Package Manager plugin ("pkgmanager") — v0.9.1.
+ * MeshCentral Package Manager plugin ("pkgmanager") — v1.0.0.
  *
  * Design: the catalog lives server-side (catalog.json next to this file).
  * The plugin pages are TABS IN THE TOP GRAY BAR (their own
@@ -29,6 +29,12 @@
  *     the form. v0.9.1: the management Add/Edit form uses the SAME
  *     single-form pattern (OS dropdown + its own per-OS drafts + merge
  *     save) — "Modifica" no longer shows one section per OS.
+ *   - "My Files" (p5) shows the PLUGIN STORE PATH too (v1.0.0): the
+ *     server sends the absolute store dir in the catalog reply and
+ *     entering p5 injects a subtle line under the title with the path
+ *     (plus per-package subdir and the LAN download route); leaving p5
+ *     removes it. Core elements are untouched (#p5rightOfButtons is the
+ *     quota bar: the line goes inside #p5title).
  * The sidebar box opens the main page directly (no dropdown), and the
  * per-device "Plugins" tab (p19) keeps a single-device entry point.
  *
@@ -54,13 +60,13 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '0.9.1';
+    obj.version = '1.0.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgSidebarInstall', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgStorePathShow', 'pkgStorePathHide', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -172,6 +178,32 @@ module.exports.pkgmanager = function (parent) {
     // for the core, yet would tear this page down. Mirror the core guard: with a
     // modal open keep the plugin page; a real navigation (modal closed) still
     // tears it down.
+    // v1.0.0 — "My Files" store-path line. Injected INSIDE #p5title (the core
+    // uses #p5rightOfButtons for the quota bar: untouched). Removed on leave.
+    obj.pkgStorePathShow = function () {
+        try {
+            if (document.getElementById('pkgmanagerStorePathInfo') != null) return;
+            var t = document.getElementById('p5title');
+            if (t == null) return;
+            var d = document.createElement('div');
+            d.id = 'pkgmanagerStorePathInfo';
+            d.style.cssText = 'color:#888;font-size:12px;margin:4px 0 2px 0;font-family:Arial,Helvetica,sans-serif';
+            var p = window.pkgmanagerStorePath;
+            if (p == null) {
+                d.innerHTML = 'pkgmanager — percorso dello store artefatti: in arrivo dal server…';
+            } else {
+                d.innerHTML = 'pkgmanager — artefatti airgap salvati sul server in: <b style="font-family:monospace">' + EscapeHtml(p) + '</b> · per pacchetto: <span style="font-family:monospace">' + EscapeHtml(p) + '/&lt;id-pacchetto&gt;/</span> · i device scaricano da <span style="font-family:monospace">' + EscapeHtml(location.origin) + '/pkgstore.ashx</span> in LAN';
+            }
+            t.appendChild(d);
+        } catch (e) { }
+    };
+    obj.pkgStorePathHide = function () {
+        try {
+            var d = document.getElementById('pkgmanagerStorePathInfo');
+            if (d != null) { d.remove(); }
+        } catch (e) { }
+    };
+
     obj.goPageStart = function (x, event) {
         try {
             if ((typeof xxdialogMode !== 'undefined') && xxdialogMode) return; // core would no-op this go()
@@ -181,6 +213,8 @@ module.exports.pkgmanager = function (parent) {
             if (w != null) w.style.display = 'none';
             var b = document.getElementById('LeftMenuPackages');
             if (b != null) b.style.opacity = '';
+            // v1.0.0: "My Files" (p5) also shows the plugin store path.
+            if (x == 5) { pluginHandler.pkgmanager.pkgStorePathShow(); } else { pluginHandler.pkgmanager.pkgStorePathHide(); }
         } catch (e) { }
     };
 
@@ -844,6 +878,7 @@ module.exports.pkgmanager = function (parent) {
         try {
             window.pkgmanagerCatalog = message.catalog;
             window.pkgmanagerToken = message.token;
+            if (message.storePath != null) { window.pkgmanagerStorePath = String(message.storePath); }
             if (message.opAck != null) { window.pkgmanagerAdminMsg = message.opAck; }
             pluginHandler.pkgmanager.pkgTabSetActive(window.pkgmanagerView);
             var cat = window.pkgmanagerCatalog;
@@ -1112,7 +1147,7 @@ module.exports.pkgmanager = function (parent) {
             // pluginHandler[message.plugin][message.method](server, message):
             // plugin and method must be at the TOP level, not nested in event.
             var send = function () {
-                try { session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgList', catalog: cat, token: obj.dlToken, opAck: opAck, error: (err2 ? String(err2) : (err || null)) }); } catch (e) { console.log('pkgmanager: reply failed: ' + e); }
+                try { session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgList', catalog: cat, token: obj.dlToken, storePath: obj.storePath, opAck: opAck, error: (err2 ? String(err2) : (err || null)) }); } catch (e) { console.log('pkgmanager: reply failed: ' + e); }
             };
             if ((cat == null) || (cat.packages == null)) { send(); return; }
             var oses = ['linux', 'windows', 'macos'];
