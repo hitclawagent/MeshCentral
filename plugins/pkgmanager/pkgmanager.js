@@ -1,5 +1,5 @@
 /**
- * MeshCentral Package Manager plugin ("pkgmanager") — v1.2.1.
+ * MeshCentral Package Manager plugin ("pkgmanager") — v1.3.0.
  *
  * Design: the catalog lives server-side (catalog.json next to this file).
  * The plugin pages are TABS IN THE TOP GRAY BAR (their own
@@ -34,6 +34,10 @@
  *     BUILDER (v0.9.0) — ONE single form with an OS dropdown (like the
  *     other options): switching OS swaps artifact/type/timeout/command
  *     fields and a per-OS draft in memory never loses anything. Airgap
+ *     v1.3.0 UPDATE MANAGER: per-OS "version" + "vcheck" (version-check
+ *     command, preset-generated per artifact extension), «Verifica versioni»
+ *     scan of the selected machines -> installed-vs-catalog matrix, and
+ *     «Aggiorna superati» (airgap reinstall of outdated/missing ones).
  *     presets per artifact extension, {{url}}/{{sha384}} insertion at the
  *     cursor, artifact upload, live ID check. Save MERGES: drafted defs +
  *     defs already saved for that ID (the wizard never silently drops a
@@ -76,13 +80,13 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '1.2.1';
+    obj.version = '1.3.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgVerScan', 'pkgVerPoll', 'pkgVerParse', 'pkgVerRender', 'pkgVerCell', 'pkgVerOf', 'pkgUpdateOutdated', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -289,9 +293,12 @@ module.exports.pkgmanager = function (parent) {
             x += '<tr><td style="padding:4px">Sistema operativo</td><td style="padding:4px"><select id=pkgfOs onchange="pluginHandler.pkgmanager.pkgCreateOsChange()"><option value=linux selected>Linux</option><option value=windows>Windows</option><option value=macos>macOS</option></select> <span id=pkgfOsHint style="color:#888"></span></td></tr>';
             x += '<tr><td style="padding:4px">Artefatto (file nello store)</td><td style="padding:4px"><input type=text id=pkgfArt style=width:280px oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"> <input type=button value="Carica artefatto…" onclick="pluginHandler.pkgmanager.pkgCreateUpload()"> <input type=button value="Elimina artefatto" onclick="pluginHandler.pkgmanager.pkgCreateArtifactDel()"></td></tr>';
             x += '<tr><td style="padding:4px">Tipo comando</td><td style="padding:4px"><select id=pkgfType onchange="pluginHandler.pkgmanager.pkgCreateDraftSync()"><option value=3>Shell (Linux/macOS)</option><option value=1>cmd.exe (Windows)</option><option value=2>PowerShell (Windows)</option></select> · Timeout (s): <input type=text id=pkgfTo style=width:70px value=300 oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></td></tr>';
+            x += '<tr><td style="padding:4px">Versione (questo artefatto)</td><td style="padding:4px"><input type=text id=pkgfVer style=width:140px oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"> <span style="color:#888;font-size:12px">confrontata da «Verifica versioni»</span></td></tr>';
             x += '</table>';
             x += '<div style="padding:4px 0">Comando: <input type=button value="Preset airgap" onclick="pluginHandler.pkgmanager.pkgCreatePreset()"> <input type=button value="Inserisci {{url}}" onclick="pluginHandler.pkgmanager.pkgCreateInsert(\'url\')"> <input type=button value="Inserisci {{sha384}}" onclick="pluginHandler.pkgmanager.pkgCreateInsert(\'sha384\')"></div>';
             x += '<textarea id="pkgfCmd" style="width:640px;height:80px;font-family:monospace" oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></textarea>';
+            x += '<div style="padding:4px 0">Comando di verifica versione (vcheck — stampa la versione installata; usato da «Verifica versioni»):</div>';
+            x += '<textarea id="pkgfVcheck" style="width:640px;height:40px;font-family:monospace" oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></textarea>';
             x += '<div style="padding:4px 0">Comando di disinstallazione (obbligatoria — generata dal preset o scritta a mano; eseguita dal tasto «Elimina selezionati»):</div>';
             x += '<textarea id="pkgfUn" style="width:640px;height:50px;font-family:monospace" oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></textarea></div>';
             x += '<div style="margin-top:6px"><input type=button value="Salva pacchetto" onclick="pluginHandler.pkgmanager.pkgCreateSave()"> <input type=file id="pkgfFile" style="display:none"></div>';
@@ -308,6 +315,8 @@ module.exports.pkgmanager = function (parent) {
             Q('pkgfTo').value = ((dd != null) && (dd.to != null)) ? dd.to : '300';
             Q('pkgfCmd').value = ((dd != null) && (dd.cmd != null)) ? dd.cmd : '';
             Q('pkgfUn').value = ((dd != null) && (dd.un != null)) ? dd.un : '';
+            Q('pkgfVer').value = ((dd != null) && (dd.ver != null)) ? dd.ver : '';
+            Q('pkgfVcheck').value = ((dd != null) && (dd.vc != null)) ? dd.vc : '';
             pluginHandler.pkgmanager.pkgCreateCheckId();
             pluginHandler.pkgmanager.pkgCreateOsHint();
         } catch (e) { console.log('pkgmanager create render failed: ' + e); }
@@ -323,7 +332,7 @@ module.exports.pkgmanager = function (parent) {
     obj.pkgCreateFieldSync = function (os) {
         try {
             if (window.pkgmanagerDraft == null) { window.pkgmanagerDraft = {}; }
-            window.pkgmanagerDraft[os] = { art: Q('pkgfArt').value.trim(), type: String(Q('pkgfType').value), to: Q('pkgfTo').value.trim(), cmd: Q('pkgfCmd').value, un: Q('pkgfUn').value };
+            window.pkgmanagerDraft[os] = { art: Q('pkgfArt').value.trim(), type: String(Q('pkgfType').value), to: Q('pkgfTo').value.trim(), cmd: Q('pkgfCmd').value, un: Q('pkgfUn').value, ver: Q('pkgfVer').value.trim(), vc: Q('pkgfVcheck').value };
         } catch (e) { }
     };
     // Sync base fields + the current-OS draft. Wizard-only: a no-op in the
@@ -347,6 +356,8 @@ module.exports.pkgmanager = function (parent) {
             Q('pkgfTo').value = ((d != null) && (d.to != null)) ? d.to : '300';
             Q('pkgfCmd').value = ((d != null) && (d.cmd != null)) ? d.cmd : '';
             Q('pkgfUn').value = ((d != null) && (d.un != null)) ? d.un : '';
+            Q('pkgfVer').value = ((d != null) && (d.ver != null)) ? d.ver : '';
+            Q('pkgfVcheck').value = ((d != null) && (d.vc != null)) ? d.vc : '';
             window.pkgmanagerDraftOs = os;
             pluginHandler.pkgmanager.pkgCreateOsHint();
         } catch (e) { }
@@ -403,6 +414,8 @@ module.exports.pkgmanager = function (parent) {
                         var to = parseInt(d.to); if (to > 0) { def.timeout = to; }
                         if ((d.art != null) && (d.art.trim() != '')) { def.artifact = d.art.trim(); }
                         if ((d.un != null) && (d.un.trim() != '')) { def.uninstall = d.un.trim(); }
+                        if ((d.ver != null) && (d.ver.trim() != '')) { def.version = d.ver.trim(); }
+                        if ((d.vc != null) && (d.vc.trim() != '')) { def.vcheck = d.vc.trim(); }
                         pkg[k] = def;
                     }
                 }
@@ -441,19 +454,24 @@ module.exports.pkgmanager = function (parent) {
             var a = (art != '') ? art : 'pacchetto';
             var base = ((a.indexOf('.') > 0) ? a.slice(0, a.lastIndexOf('.')) : a);
             var ext = a.slice(a.lastIndexOf('.') + 1).toLowerCase();
-            var cmd = '', un = '', unNote = '';
+            var cmd = '', un = '', unNote = '', vcheck = '', vcNote = '';
             if (os == 'linux') {
                 var inst = 'sh /tmp/' + a;
                 if (ext == 'deb') { inst = 'sudo -n dpkg -i /tmp/' + a; un = 'sudo -n dpkg -r ' + base; }
                 else if (ext == 'rpm') { inst = 'sudo -n rpm -Uvh --force /tmp/' + a; un = 'sudo -n rpm -e ' + base; }
                 else if (ext == 'apk') { inst = 'sudo -n apk add --allow-untrusted /tmp/' + a; un = 'sudo -n apk del ' + base; }
                 else { unNote = ' — disinstallazione non automatizzabile per .' + ext + ', scrivila a mano (è obbligatoria)'; }
+                if (ext == 'deb') { vcheck = "dpkg-query -W -f='${Version}' " + base + " 2>/dev/null || true"; }
+                else if (ext == 'rpm') { vcheck = "rpm -q --qf '%{VERSION}' " + base + " 2>/dev/null || true"; }
+                else if (ext == 'apk') { vcheck = "apk info -v " + base + " 2>/dev/null | sed 's/^" + base + "-//' || true"; }
+                else { vcNote = ' — verifica versione non automatizzabile per .' + ext + ', scrivila a mano (usata da «Verifica versioni»)'; }
                 cmd = "curl -kfsSL -o /tmp/" + a + " '{{url}}' && echo '{{sha384}}  /tmp/" + a + "' | sha384sum -c - && " + inst;
                 Q('pkgfType').value = '3';
             } else if (os == 'windows') {
                 var inst = '"%TEMP%\\' + a + '" /S';
                 if (ext == 'msi') { inst = 'msiexec /i "%TEMP%\\' + a + '" /qn'; un = 'msiexec /x "%TEMP%\\' + a + '" /qn'; }
                 else { unNote = ' — disinstallazione non automatizzabile per .' + ext + ', scrivila a mano (è obbligatoria)'; }
+                vcNote = ' — verifica versione non automatizzabile per .' + ext + ' (serve una query registry/GUID), scrivila a mano (usata da «Verifica versioni»)';
                 cmd = 'curl -kfsSL -o "%TEMP%\\' + a + '" "{{url}}" && certutil -hashfile "%TEMP%\\' + a + '" SHA384 | findstr /i "{{sha384}}" && ' + inst;
                 Q('pkgfType').value = '1';
             } else {
@@ -461,15 +479,19 @@ module.exports.pkgmanager = function (parent) {
                 if (ext == 'pkg') { inst = 'sudo -n installer -pkg /tmp/' + a + ' -target /'; un = 'sudo -n pkgutil --forget ' + base; }
                 else if (ext == 'app') { inst = 'cp -R /tmp/' + a + ' /Applications/'; un = 'sudo -n rm -rf "/Applications/' + base + '.app"'; }
                 else { unNote = ' — disinstallazione non automatizzabile per .' + ext + ', scrivila a mano (è obbligatoria)'; }
+                if (ext == 'pkg') { vcheck = "pkgutil --pkg-info " + base + " 2>/dev/null | awk '/^version:/ {print $2}' || true"; }
+                else if (ext == 'app') { vcheck = "defaults read '/Applications/" + base + ".app/Contents/Info/' CFBundleShortVersionString 2>/dev/null || true"; }
+                else { vcNote = ' — verifica versione non automatizzabile per .' + ext + ', scrivila a mano (usata da «Verifica versioni»)'; }
                 cmd = "curl -kfsSL -o /tmp/" + a + " '{{url}}' && echo '{{sha384}}  /tmp/" + a + "' | shasum -a 384 -c - && " + inst;
                 Q('pkgfType').value = '3';
             }
             Q('pkgfCmd').value = cmd;
             Q('pkgfUn').value = un;
+            Q('pkgfVcheck').value = vcheck;
             pluginHandler.pkgmanager.pkgCreateDraftSync();
             pluginHandler.pkgmanager.pkgAdminDraftSync();
             if (window.pkgmanagerView == 'admin') { pluginHandler.pkgmanager.pkgAdminOsHint(); } else { pluginHandler.pkgmanager.pkgCreateOsHint(); }
-            pluginHandler.pkgmanager.pkgAdminStatus('Preset ' + os + ' generato: installazione' + ((un != '') ? ' + disinstallazione' : ' (solo installazione)') + ((art == '') ? ' (nome artefatto vuoto: usato "pacchetto" — compila il campo e rigenera per il nome giusto)' : ' (' + EscapeHtml(art) + ')') + unNote + '. Controlla i comandi prima di salvare.');
+            pluginHandler.pkgmanager.pkgAdminStatus('Preset ' + os + ' generato: installazione' + ((un != '') ? ' + disinstallazione' : ' (solo installazione)') + ((vcheck != '') ? ' + verifica versione' : '') + ((art == '') ? ' (nome artefatto vuoto: usato "pacchetto" — compila il campo e rigenera per il nome giusto)' : ' (' + EscapeHtml(art) + ')') + unNote + vcNote + '. Controlla i comandi prima di salvare.');
         } catch (e) { pluginHandler.pkgmanager.pkgAdminStatus('Preset fallito: ' + e); }
     };
 
@@ -572,7 +594,7 @@ module.exports.pkgmanager = function (parent) {
     obj.pkgAdminFieldSync = function (os) {
         try {
             if (window.pkgmanagerAdminDraft == null) { window.pkgmanagerAdminDraft = {}; }
-            window.pkgmanagerAdminDraft[os] = { art: Q('pkgfArt').value.trim(), type: String(Q('pkgfType').value), to: Q('pkgfTo').value.trim(), cmd: Q('pkgfCmd').value, un: Q('pkgfUn').value };
+            window.pkgmanagerAdminDraft[os] = { art: Q('pkgfArt').value.trim(), type: String(Q('pkgfType').value), to: Q('pkgfTo').value.trim(), cmd: Q('pkgfCmd').value, un: Q('pkgfUn').value, ver: Q('pkgfVer').value.trim(), vc: Q('pkgfVcheck').value };
         } catch (e) { }
     };
     // Sync the CURRENT-OS fields into the management draft. Management-only:
@@ -594,6 +616,8 @@ module.exports.pkgmanager = function (parent) {
             Q('pkgfTo').value = ((d != null) && (d.to != null)) ? d.to : '300';
             Q('pkgfCmd').value = ((d != null) && (d.cmd != null)) ? d.cmd : '';
             Q('pkgfUn').value = ((d != null) && (d.un != null)) ? d.un : '';
+            Q('pkgfVer').value = ((d != null) && (d.ver != null)) ? d.ver : '';
+            Q('pkgfVcheck').value = ((d != null) && (d.vc != null)) ? d.vc : '';
             window.pkgmanagerAdminDraftOs = os;
             pluginHandler.pkgmanager.pkgAdminOsHint();
         } catch (e) { }
@@ -615,7 +639,7 @@ module.exports.pkgmanager = function (parent) {
                     // A draft that still MATCHES the saved def (just loaded into
                     // the form for editing) is 'salvato'; only real edits are 'bozza'.
                     var sd = saved[os];
-                    var same = (sd != null) && (String(d.cmd) == String(sd.cmd || '')) && (String(d.art || '') == String(sd.artifact || '')) && (String(d.type) == String(sd.type)) && (String(parseInt(d.to) || '') == String(sd.timeout || ''));
+                    var same = (sd != null) && (String(d.cmd) == String(sd.cmd || '')) && (String(d.art || '') == String(sd.artifact || '')) && (String(d.type) == String(sd.type)) && (String(parseInt(d.to) || '') == String(sd.timeout || '')) && (String(d.ver || '') == String(sd.version || '')) && (String(d.vc || '') == String(sd.vcheck || ''));
                     parts.push(oses[k][1] + (same ? ': salvato' : ': bozza'));
                 }
                 else if (saved[os] != null) { parts.push(oses[k][1] + ': salvato'); }
@@ -644,7 +668,7 @@ module.exports.pkgmanager = function (parent) {
                 var os = oses[k][0];
                 var def = ((pkg != null) ? pkg[os] : null);
                 if (def != null) {
-                    draft[os] = { art: ((def.artifact != null) ? String(def.artifact) : ''), type: String(def.type), to: ((def.timeout != null) ? String(def.timeout) : '300'), cmd: String(def.cmd || ''), un: ((def.uninstall != null) ? String(def.uninstall) : '') };
+                    draft[os] = { art: ((def.artifact != null) ? String(def.artifact) : ''), type: String(def.type), to: ((def.timeout != null) ? String(def.timeout) : '300'), cmd: String(def.cmd || ''), un: ((def.uninstall != null) ? String(def.uninstall) : ''), ver: ((def.version != null) ? String(def.version) : ''), vc: ((def.vcheck != null) ? String(def.vcheck) : '') };
                     if (osCur == '') { osCur = os; }
                 }
             }
@@ -652,6 +676,7 @@ module.exports.pkgmanager = function (parent) {
             window.pkgmanagerAdminDraft = draft;
             window.pkgmanagerAdminDraftOs = osCur;
             var d0 = draft[osCur];
+            x += '<tr><td style="padding:4px">Versione (per OS selezionato)</td><td style="padding:4px"><input type=text id=pkgfVer style=width:140px oninput="pluginHandler.pkgmanager.pkgAdminDraftSync()" value="' + EscapeHtml(((d0 != null) ? (d0.ver || '') : '')) + '"> <span style="color:#888;font-size:12px">confrontata da «Verifica versioni»</span></td></tr>';
             x += '<tr><td style="padding:4px">Sistema operativo</td><td style="padding:4px"><select id=pkgfOs onchange="pluginHandler.pkgmanager.pkgAdminOsChange()">';
             for (var k2 = 0; k2 < oses.length; k2++) { x += '<option value="' + oses[k2][0] + '"' + ((oses[k2][0] == osCur) ? ' selected' : '') + '>' + oses[k2][1] + '</option>'; }
             x += '</select> <span id=pkgfOsHint style="color:#888"></span></td></tr>';
@@ -660,6 +685,8 @@ module.exports.pkgmanager = function (parent) {
             x += '</table>';
             x += '<div style="padding:4px 0">Comando: <input type=button value="Preset airgap" onclick="pluginHandler.pkgmanager.pkgCreatePreset()"> <input type=button value="Inserisci {{url}}" onclick="pluginHandler.pkgmanager.pkgCreateInsert(\'url\')"> <input type=button value="Inserisci {{sha384}}" onclick="pluginHandler.pkgmanager.pkgCreateInsert(\'sha384\')"></div>';
             x += '<textarea id=pkgfCmd style="width:640px;height:80px;font-family:monospace" oninput="pluginHandler.pkgmanager.pkgAdminDraftSync()">' + EscapeHtml(((d0 != null) ? (d0.cmd || '') : '')) + '</textarea>';
+            x += '<div style="padding:4px 0">Comando di verifica versione (vcheck — stampa la versione installata; usato da «Verifica versioni»):</div>';
+            x += '<textarea id=pkgfVcheck style="width:640px;height:40px;font-family:monospace" oninput="pluginHandler.pkgmanager.pkgAdminDraftSync()">' + EscapeHtml(((d0 != null) ? (d0.vc || '') : '')) + '</textarea>';
             x += '<div style="padding:4px 0">Comando di disinstallazione (obbligatoria — generata dal preset o scritta a mano; eseguita dal tasto «Elimina selezionati»):</div>';
             x += '<textarea id=pkgfUn style="width:640px;height:50px;font-family:monospace" oninput="pluginHandler.pkgmanager.pkgAdminDraftSync()">' + EscapeHtml(((d0 != null) ? (d0.un || '') : '')) + '</textarea></div>';
             x += '<div style="margin-top:10px"><input type=button value="Salva" onclick="pluginHandler.pkgmanager.pkgAdminSave(' + (isNew ? 'true' : 'false') + ')"> <input type=button value="Annulla" onclick="pluginHandler.pkgmanager.pkgAdminRender()"> <input type=file id="pkgfFile" style="display:none"></div>';
@@ -752,6 +779,8 @@ module.exports.pkgmanager = function (parent) {
                         var to = parseInt(d.to); if (to > 0) { def.timeout = to; }
                         if ((d.art != null) && (d.art.trim() != '')) { def.artifact = d.art.trim(); }
                         if ((d.un != null) && (d.un.trim() != '')) { def.uninstall = d.un.trim(); }
+                        if ((d.ver != null) && (d.ver.trim() != '')) { def.version = d.ver.trim(); }
+                        if ((d.vc != null) && (d.vc.trim() != '')) { def.vcheck = d.vc.trim(); }
                         pkg[k] = def;
                     }
                 }
@@ -798,7 +827,7 @@ module.exports.pkgmanager = function (parent) {
             x += '<div id="pkgmanagerSelSummary" style="margin-bottom:8px;color:#888"></div>';
             x += '<div style="display:flex;gap:16px;align-items:flex-start">';
             x += '<div style="flex:1 1 60%;min-width:0"><div style="margin-bottom:4px"><b>Pacchetti</b> <span id="pkgmanagerFilterNote" style="color:#888;font-weight:normal"></span> <span style="font-size:12px">[<a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(true);return false">tutti</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(false);return false">nessuno</a>]</span></div>';
-            x += '<div style="margin-bottom:6px"><input type=button value="Installa selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'install\')"> <input type=button value="Elimina selezionati" title="Esegue il comando di disinstallazione sui dispositivi selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'delete\')"> <span id="pkgmanagerPkgSummary" style="color:#888;font-weight:normal"></span></div><div id="pkgmanagerTableWrap"></div></div>';
+            x += '<div style="margin-bottom:6px"><input type=button value="Installa selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'install\')"> <input type=button value="Elimina selezionati" title="Esegue il comando di disinstallazione sui dispositivi selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'delete\')"> <input type=button value="Verifica versioni" title="Esegue i comandi vcheck sui dispositivi selezionati e compila la matrice installata vs disponibile" onclick="pluginHandler.pkgmanager.pkgVerScan()"> <input type=button value="Aggiorna superati" title="Reinstalla in airgap i pacchetti con versione installata diversa o mancante rispetto al catalogo" onclick="pluginHandler.pkgmanager.pkgUpdateOutdated()"> <span id="pkgmanagerPkgSummary" style="color:#888;font-weight:normal"></span></div><div id="pkgmanagerTableWrap"></div></div>';
             x += '<div style="flex:0 0 320px;border-left:1px solid #ddd;padding-left:12px">';
             x += '<div style="margin-bottom:4px"><b>Macchine di destinazione</b> — <span style="font-size:12px"><a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(true);return false">tutte</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(false);return false">nessuna</a></span></div>';
             x += '<div id="pkgmanagerDeviceList" style="max-height:420px;overflow-y:auto">';
@@ -813,6 +842,7 @@ module.exports.pkgmanager = function (parent) {
             }
             x += '</div><div style="margin-top:6px;color:#888;font-size:12px">Le macchine offline non sono selezionabili.</div>';
             x += '</div></div>';
+            x += '<div id="pkgmanagerVerMatrix" style="margin-top:10px"></div>';
             x += '<div id="pkgmanagerMsg" style="margin-top:10px;color:#888"></div>';
             m.innerHTML = x;
             pluginHandler.pkgmanager.pkgSidebarRender();
@@ -1019,6 +1049,215 @@ module.exports.pkgmanager = function (parent) {
             el.innerText = (n > 0) ? (n + ' pacchett' + ((n == 1) ? 'o selezionato' : 'i selezionati')) : 'nessun pacchetto selezionato';
         } catch (e) { }
     };
+
+    // ---- v1.3.0 UPDATE MANAGER (client) ----
+    // «Verifica versioni»: runs the per-OS "vcheck" command of every selected
+    // package on every selected ONLINE machine, WITHOUT opening the results
+    // modal: the plugin registers its own responseid in d2runPending (the
+    // same map the Run Commands dialog uses) and polls the per-machine
+    // combined output. Each package is prefixed with a "__pkg:<id>" echo line
+    // so one combined runcommands reply can be split back per package.
+    obj.pkgVerScan = function () {
+        try {
+            var cat = window.pkgmanagerCatalog;
+            if ((cat == null) || (cat.packages == null)) { pluginHandler.pkgmanager.pkgMsg('Catalogo non caricato.'); return; }
+            pluginHandler.pkgmanager.pkgPkgToggle();
+            var selPkg = [];
+            var cbs = document.querySelectorAll('.pkgmanagerPkgCb');
+            for (var i = 0; i < cbs.length; i++) {
+                if (!cbs[i].checked) { continue; }
+                for (var j = 0; j < cat.packages.length; j++) { if (cat.packages[j].id == cbs[i].value) { selPkg.push(cat.packages[j]); break; } }
+            }
+            if (selPkg.length == 0) { pluginHandler.pkgmanager.pkgMsg('Seleziona almeno un pacchetto (checkbox a sinistra).'); return; }
+            var sel = pluginHandler.pkgmanager.pkgSelectedNodes();
+            if (sel.length == 0) { pluginHandler.pkgmanager.pkgMsg('Seleziona almeno una macchina di destinazione a destra.'); return; }
+            var machs = [];
+            for (var i = 0; i < sel.length; i++) {
+                var n = sel[i];
+                if ((n.conn & 1) == 0) { continue; }
+                machs.push({ id: n._id, name: n.name, os: pluginHandler.pkgmanager.pkgTargetOs(n) });
+            }
+            if (machs.length == 0) { pluginHandler.pkgmanager.pkgMsg('Nessuna macchina connessa selezionata.'); return; }
+            var sends = {};
+            for (var q = 0; q < selPkg.length; q++) {
+                var pkg = selPkg[q];
+                for (var m = 0; m < machs.length; m++) {
+                    var os = machs[m].os;
+                    var def = pkg[os];
+                    if (def == null) { continue; }
+                    var vc = ((def.vcheck != null) && (String(def.vcheck).trim() != '')) ? String(def.vcheck).trim() : null;
+                    var cmd;
+                    if (def.type == 1) { cmd = 'echo __pkg:' + pkg.id + ' & ' + ((vc != null) ? vc : 'echo .') + ' & exit /b 0'; }
+                    else if (def.type == 2) { cmd = 'Write-Output "__pkg:' + pkg.id + '"; ' + ((vc != null) ? vc : 'Write-Output ""') + '; exit 0'; }
+                    else { cmd = 'echo "__pkg:' + pkg.id + '" ; ' + ((vc != null) ? vc : 'true') + ' 2>/dev/null ; true'; }
+                    var key = os + '|' + def.type;
+                    if (sends[key] == null) { sends[key] = { type: def.type, cmds: [], timeout: 60, nodeids: [] }; }
+                    if (sends[key].nodeids.indexOf(machs[m].id) < 0) { sends[key].nodeids.push(machs[m].id); }
+                    sends[key].cmds.push(cmd);
+                }
+            }
+            var rid = ((typeof d2runResponseId == 'function') ? d2runResponseId() : ('pkgver-' + Date.now() + '-' + Math.floor(Math.random() * 1000000)));
+            if (typeof d2runPending != 'object') { window.d2runPending = {}; }
+            var allids = [];
+            for (var m2 = 0; m2 < machs.length; m2++) { allids.push(machs[m2].id); }
+            d2runPending[rid] = { nodes: allids.slice(0), results: {} };
+            var anySend = false;
+            for (var key in sends) {
+                var g = sends[key];
+                meshserver.send({ action: 'runcommands', nodeids: g.nodeids, type: g.type, cmds: g.cmds.join('\n'), runAsUser: 0, reply: true, responseid: rid, timeout: g.timeout });
+                anySend = true;
+            }
+            window.pkgmanagerVerPkgs = [];
+            for (var q2 = 0; q2 < selPkg.length; q2++) { window.pkgmanagerVerPkgs.push(selPkg[q2].id); }
+            window.pkgmanagerVerMachines = machs;
+            window.pkgmanagerVerData = {};
+            window.pkgmanagerVerScanRun = { rid: rid, started: Date.now() };
+            pluginHandler.pkgmanager.pkgMsg(((anySend) ? 'Verifica versioni avviata su ' + machs.length + ' macchina/e — matrice qui sotto.' : 'Nessun comando di verifica versione per la selezione (vcheck mancante o OS senza definizione).'));
+            pluginHandler.pkgmanager.pkgVerRender();
+            pluginHandler.pkgmanager.pkgVerPoll();
+        } catch (e) { console.log('pkgmanager ver scan failed: ' + e); }
+    };
+
+    // Split one machine's combined vcheck output back per package: the last
+    // non-empty line after each "__pkg:<id>" marker is that package version.
+    obj.pkgVerParse = function (raw) {
+        var out = {};
+        try {
+            var lines = String(raw || '').split(/\r?\n/);
+            var cur = null;
+            for (var i = 0; i < lines.length; i++) {
+                var t = lines[i].trim();
+                var mk = /^__pkg:([A-Za-z0-9._-]+)$/.exec(t);
+                if (mk != null) { cur = mk[1]; out[cur] = ''; continue; }
+                if (cur == null) { continue; }
+                if (t != '') { out[cur] = t; }
+            }
+        } catch (e) { }
+        return out;
+    };
+
+    // Poll d2runPending (1s) until every machine answered or 180s cap.
+    obj.pkgVerPoll = function () {
+        try {
+            var run = window.pkgmanagerVerScanRun;
+            if (run == null) { return; }
+            var p = ((typeof d2runPending == 'object') && (d2runPending[run.rid] != null)) ? d2runPending[run.rid] : null;
+            var done = 0;
+            if (p != null) {
+                for (var nid in p.results) {
+                    if (window.pkgmanagerVerData == null) { window.pkgmanagerVerData = {}; }
+                    window.pkgmanagerVerData[nid] = pluginHandler.pkgmanager.pkgVerParse(p.results[nid]);
+                }
+                for (var k in p.results) { done++; }
+            }
+            var machs = window.pkgmanagerVerMachines || [];
+            pluginHandler.pkgmanager.pkgVerRender();
+            if ((done < machs.length) && ((Date.now() - run.started) < 180000)) {
+                setTimeout(function () { pluginHandler.pkgmanager.pkgVerPoll(); }, 1000);
+            } else {
+                try { delete d2runPending[run.rid]; } catch (e2) { }
+                window.pkgmanagerVerScanRun = null;
+                pluginHandler.pkgmanager.pkgMsg('Verifica versioni completata — usa «Aggiorna superati» per reinstallare in airgap ciò che risulta superato o mancante.');
+            }
+        } catch (e) { console.log('pkgmanager ver poll failed: ' + e); }
+    };
+
+    // Matrix cell: per package x machine (installed vs catalog for that OS).
+    obj.pkgVerCell = function (pkg, m) {
+        try {
+            var def = pkg[m.os];
+            if (def == null) { return '<span style="color:#999">n/d</span>'; }
+            var want = String(def.version || '').trim();
+            var data = (window.pkgmanagerVerData != null) ? window.pkgmanagerVerData[m.id] : null;
+            if (data == null) { return '<span style="color:#888">in verifica…</span>'; }
+            var got = String(data[pkg.id] || '').trim();
+            if (want == '') { return '<span style="color:#999">' + ((got != '') ? EscapeHtml(got) : '—') + ' <span style="font-size:11px">(catalogo senza versione)</span></span>'; }
+            if (got == '') { return '<span style="color:#a60">non installata / verifica vuota</span>'; }
+            if (got == want) { return '<span style="color:#080">✓ ' + EscapeHtml(got) + ' (aggiornata)</span>'; }
+            return '<span style="color:#c00">✗ ' + EscapeHtml(got) + ' → ' + EscapeHtml(want) + ' (aggiornabile)</span>';
+        } catch (e) { return '<span style="color:#999">?</span>'; }
+    };
+
+    obj.pkgVerOf = function (pkg) {
+        try {
+            var oses = ['linux', 'windows', 'macos'], parts = [];
+            for (var k = 0; k < oses.length; k++) {
+                var d = pkg[oses[k]];
+                if ((d != null) && (d.version != null) && (String(d.version).trim() != '')) { parts.push(oses[k] + ': ' + String(d.version).trim()); }
+            }
+            return (parts.length > 0) ? parts.join(' · ') : '—';
+        } catch (e) { return '—'; }
+    };
+
+    obj.pkgVerRender = function () {
+        try {
+            var el = document.getElementById('pkgmanagerVerMatrix');
+            if (el == null) return;
+            var cat = window.pkgmanagerCatalog;
+            var pkgs = window.pkgmanagerVerPkgs || [];
+            var machs = window.pkgmanagerVerMachines || [];
+            if ((pkgs.length == 0) || (machs.length == 0)) { el.innerHTML = ''; return; }
+            var x = '<div style="margin-top:10px;font-size:15px"><b>Versioni installate vs disponibili</b> <span style="color:#888;font-size:12px">(vcheck via LAN, nessuna connessione esterna)</span></div>';
+            x += '<table style="border-collapse:collapse;margin-top:4px"><tr><td style="padding:4px;border-bottom:1px solid #ddd"><b>Pacchetto</b></td><td style="padding:4px;border-bottom:1px solid #ddd"><b>Catalogo</b></td>';
+            for (var i = 0; i < machs.length; i++) { x += '<td style="padding:4px;border-bottom:1px solid #ddd"><b>' + EscapeHtml(machs[i].name) + '</b> <span style="color:#888;font-size:11px">(' + machs[i].os + ')</span></td>'; }
+            x += '</tr>';
+            for (var q = 0; q < pkgs.length; q++) {
+                var pkg = null;
+                for (var j = 0; j < ((cat != null) ? cat.packages.length : 0); j++) { if (cat.packages[j].id == pkgs[q]) { pkg = cat.packages[j]; break; } }
+                if (pkg == null) { continue; }
+                x += '<tr><td style="padding:4px">' + EscapeHtml(pkg.name) + '</td><td style="padding:4px;color:#888">' + EscapeHtml(pluginHandler.pkgmanager.pkgVerOf(pkg)) + '</td>';
+                for (var i2 = 0; i2 < machs.length; i2++) { x += '<td style="padding:4px">' + pluginHandler.pkgmanager.pkgVerCell(pkg, machs[i2]) + '</td>'; }
+                x += '</tr>';
+            }
+            x += '</table><div style="color:#888;font-size:12px;margin-top:4px">«Aggiorna superati» reinstalla in airgap i pacchetti segnati aggiornabili (o mancanti).</div>';
+            el.innerHTML = x;
+        } catch (e) { console.log('pkgmanager ver render failed: ' + e); }
+    };
+
+    // «Aggiorna superati»: airgap reinstall (same install cmd) of every
+    // scanned package whose installed version differs from the catalog
+    // version, or is missing. Up-to-date machines are skipped.
+    obj.pkgUpdateOutdated = function () {
+        try {
+            var cat = window.pkgmanagerCatalog;
+            if ((cat == null) || (cat.packages == null)) { pluginHandler.pkgmanager.pkgMsg('Catalogo non caricato.'); return; }
+            var pkgs = window.pkgmanagerVerPkgs || [], machs = window.pkgmanagerVerMachines || [], data = window.pkgmanagerVerData || {};
+            if ((pkgs.length == 0) || (machs.length == 0)) { pluginHandler.pkgmanager.pkgMsg('Prima fai «Verifica versioni» con pacchetti e macchine selezionati.'); return; }
+            if (window.pkgmanagerVerScanRun != null) { pluginHandler.pkgmanager.pkgMsg('Verifica versioni ancora in corso: attendi il completamento.'); return; }
+            var sends = {}, allids = [], anyVcheckMissing = false;
+            for (var q = 0; q < pkgs.length; q++) {
+                var pkg = null;
+                for (var j = 0; j < cat.packages.length; j++) { if (cat.packages[j].id == pkgs[q]) { pkg = cat.packages[j]; break; } }
+                if (pkg == null) { continue; }
+                for (var m = 0; m < machs.length; m++) {
+                    var mm = machs[m];
+                    var def = pkg[mm.os];
+                    if (def == null) { continue; }
+                    var want = String(def.version || '').trim();
+                    if (want == '') { continue; }
+                    var got = String(((data[mm.id] != null) ? (data[mm.id][pkg.id] || '') : '')).trim();
+                    if (got == want) { continue; }
+                    if ((got == '') && ((def.vcheck == null) || (String(def.vcheck).trim() == ''))) { anyVcheckMissing = true; continue; }
+                    var cmd = pluginHandler.pkgmanager.pkgCompose(pkg, def);
+                    if (cmd == null) { pluginHandler.pkgmanager.pkgMsg('"' + pkg.name + '" (' + mm.os + '): artefatto mancante nello store — impossibile aggiornare.'); return; }
+                    var key = mm.os + '|' + def.type;
+                    if (sends[key] == null) { sends[key] = { type: def.type, cmds: [], timeout: 0, nodeids: [] }; }
+                    if (sends[key].nodeids.indexOf(mm.id) < 0) { sends[key].nodeids.push(mm.id); }
+                    if (allids.indexOf(mm.id) < 0) { allids.push(mm.id); }
+                    sends[key].cmds.push(String(cmd));
+                    var to = (def.timeout || 300); if (to > sends[key].timeout) { sends[key].timeout = to; }
+                }
+            }
+            if (allids.length == 0) { pluginHandler.pkgmanager.pkgMsg('Nessuna macchina da aggiornare' + (anyVcheckMissing ? ' (ad alcuni pacchetti manca il comando vcheck: completa la definizione)' : '') + '.'); return; }
+            var responseid = d2runBegin(allids);
+            for (var key in sends) {
+                var g = sends[key];
+                meshserver.send({ action: 'runcommands', nodeids: g.nodeids, type: g.type, cmds: g.cmds.join('\n'), runAsUser: 0, reply: true, responseid: responseid, timeout: g.timeout });
+            }
+            pluginHandler.pkgmanager.pkgMsg('Aggiornamento airgap avviato su ' + allids.length + ' macchina/e (versione superata o mancante) — output nel dialogo dei risultati.');
+        } catch (e) { console.log('pkgmanager update outdated failed: ' + e); }
+    };
+
     // BATCH RUN: every selected package x every selected machine. One
     // runcommands per OS|type group, the group's package commands joined
     // with newlines so each machine reports ONE combined result in the
@@ -1264,6 +1503,8 @@ module.exports.pkgmanager = function (parent) {
         var to = parseInt(def.timeout); if (to > 0) { out.timeout = to; }
         if ((typeof def.artifact == 'string') && (def.artifact.trim() != '') && (/^[a-zA-Z0-9._ -]+$/.test(def.artifact.trim()))) { out.artifact = def.artifact.trim(); }
         if ((typeof def.uninstall == 'string') && (def.uninstall.trim() != '')) { out.uninstall = def.uninstall.trim().slice(0, 4096); }
+        if ((typeof def.version == 'string') && (def.version.trim() != '')) { out.version = def.version.trim().slice(0, 64); }
+        if ((typeof def.vcheck == 'string') && (def.vcheck.trim() != '')) { out.vcheck = def.vcheck.trim().slice(0, 2048); }
         return out;
     };
 
