@@ -325,6 +325,6 @@ async function fetchLinuxIndex(codename) {
 
   fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   log('fatto: ' + manifest.files.length + ' file scaricati, ' + manifest.skipped.length + ' saltati -> ' + outDir);
-  log('prossimo passo: copia ' + outDir + ' sul server in plugins/pkgmanager/store/<id-bundle>/ e importa il manifest con «Importa manifest» nel plugin (o crea il bundle via Creazione aggiornamenti).');
+  log('prossimo passo: copia ' + outDir + ' sul server in plugins/pkgmanager/store/<id-bundle>/ e importa il manifest con «Importa manifest…» in Gestione aggiornamenti.');
   process.exit(0);
 })().catch((e) => { die(e.stack || e.message); });

@@ -34,6 +34,24 @@
  *     BUILDER (v0.9.0) — ONE single form with an OS dropdown (like the
  *     other options): switching OS swaps artifact/type/timeout/command
  *     fields and a per-OS draft in memory never loses anything. Airgap
+ *     v1.7.0 OS-TAB REMOVAL + INTEGRATED DOWNLOADER: OS updates can NOT be
+ *     hand-created — the «Creazione aggiornamenti» tab is GONE (the OS bar
+ *     keeps Aggiornamenti OS · Gestione aggiornamenti), the package wizard
+ *     no longer offers the OS category and «Gestione aggiornamenti» keeps
+ *     only Modifica/Elimina/Importa manifest (no manual Add): OS bundles
+ *     come ONLY from the scan pipeline. NEW «Scarica aggiornamenti»
+ *     (admin-only, OS view): sends the completed scan inventory to the
+ *     SERVER, which fetches the Ubuntu vendor indexes (security+updates,
+ *     main+universe), computes the missing updates per Linux machine
+ *     (delta + dependency closure, dpkg version compare when available),
+ *     downloads the .deb files DIRECTLY into store/<bundle-id>/ and re-
+ *     enters the v1.6.1 import path (files re-verified, kind:'os' bundle
+ *     built+saved, admin-guarded). Managed machines stay AIRGAP — only the
+ *     server talks to the vendor mirrors; installs keep flowing from the
+ *     LAN store. Windows/macOS machines are reported as skipped (best
+ *     effort — meshos-fetch.js --kb/--macos stays as the documented
+ *     fallback for a server without internet). Store-filename charset
+ *     extended to [a-zA-Z0-9._+~:-] (Debian epochs / +dfsg versions).
  *     v1.6.1 IMPORT MANIFEST: «Importa manifest…» in Gestione aggiornamenti —
  *     the client reads a meshos-fetch manifest.json (file picker), the
  *     server verifies EVERY file already sits in store/<bundle-id>/, builds
@@ -111,14 +129,16 @@
  */
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
+    var zlib = require('zlib');
+    var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var obj = {};
-    obj.version = '1.6.1';
+    obj.version = '1.7.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgOsCreateOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -196,7 +216,6 @@ module.exports.pkgmanager = function (parent) {
                 span2.innerHTML = '<table id="osmanagerMenuTable" cellpadding=0 cellspacing=0 class="style1" style="width:100%"><tr>'
                     + '<td tabindex=0 id="MainTabOsUpdates" class="topbar_td style3x" style="padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgOsSidebarOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgOsSidebarOpen()">Aggiornamenti OS</td>'
                     + '<td tabindex=0 id="MainTabOsMgmt" class="topbar_td style3x" style="display:none;padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgOsAdminOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgOsAdminOpen()">Gestione aggiornamenti</td>'
-                    + '<td tabindex=0 id="MainTabOsCreate" class="topbar_td style3x" style="display:none;padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgOsCreateOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgOsCreateOpen()">Creazione aggiornamenti</td>'
                     + '<td class="topbar_td_end style3">&nbsp;</td>'
                     + '</tr></table>';
                 sub.parentNode.insertBefore(span, sub.nextSibling);
@@ -229,21 +248,19 @@ module.exports.pkgmanager = function (parent) {
             var t3 = document.getElementById('MainTabPkgCreate');
             var o1 = document.getElementById('MainTabOsUpdates');
             var o2 = document.getElementById('MainTabOsMgmt');
-            var o3 = document.getElementById('MainTabOsCreate');
             var adm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
             if (t2 != null) { t2.style.display = adm ? '' : 'none'; }
             if (t3 != null) { t3.style.display = adm ? '' : 'none'; }
             if (o2 != null) { o2.style.display = adm ? '' : 'none'; }
-            if (o3 != null) { o3.style.display = adm ? '' : 'none'; }
             // v1.5.0: each sidebar menu shows ONLY its own gray bar (v1.4.1
             // rule kept: both hide on every core page; goPageStart -> which null).
-            var osBar = ((which == 'os') || (which == 'osadmin') || (which == 'oscreate'));
+            var osBar = ((which == 'os') || (which == 'osadmin'));
             if (spanA != null) { spanA.style.display = ((which != null) && (!osBar) && (hideRow !== true)) ? '' : 'none'; }
             if (spanB != null) { spanB.style.display = ((osBar) && (hideRow !== true)) ? '' : 'none'; }
-            var ts = [t1, t2, t3, o1, o2, o3];
+            var ts = [t1, t2, t3, o1, o2];
             for (var i = 0; i < ts.length; i++) { if (ts[i] != null) { ts[i].classList.remove('fullselect'); } }
             if (which != null) {
-                var a = { install: t1, admin: t2, create: t3, os: o1, osadmin: o2, oscreate: o3 }[which];
+                var a = { install: t1, admin: t2, create: t3, os: o1, osadmin: o2 }[which];
                 if (a != null) { a.classList.add('fullselect'); }
                 try { QC('column_l').add('room4submenu'); } catch (e) { }
             } else {
@@ -294,7 +311,7 @@ module.exports.pkgmanager = function (parent) {
     // ---- "Gestione pacchetti" (full site admins) ----
     // ---- v1.5.0: OS-side admin/create views (opened from the OS gray bar) ----
     obj.pkgIsOsView = function () {
-        return ((window.pkgmanagerView == 'os') || (window.pkgmanagerView == 'osadmin') || (window.pkgmanagerView == 'oscreate'));
+        return ((window.pkgmanagerView == 'os') || (window.pkgmanagerView == 'osadmin'));
     };
 
     obj.pkgOsAdminOpen = function () {
@@ -315,27 +332,6 @@ module.exports.pkgmanager = function (parent) {
             if (bo != null) bo.style.opacity = '1';
             pluginHandler.pkgmanager.pkgAdminRender();
         } catch (e) { console.log('pkgmanager os admin open failed: ' + e); }
-    };
-
-    obj.pkgOsCreateOpen = function () {
-        try {
-            var w = document.getElementById('pkgmanagerMainWrap');
-            if (w == null) return;
-            try {
-                if ((typeof xxcurrentView == 'number') && (xxcurrentView >= 0) && (xxcurrentView <= 60)) { QV('p' + xxcurrentView, false); }
-                xxcurrentView = -1;
-            } catch (e) { }
-            w.style.display = '';
-            window.pkgmanagerView = 'oscreate';
-            window.pkgmanagerAdminMsg = '';
-            if (window.pkgmanagerCatalog == null) { meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'list' }); }
-            pluginHandler.pkgmanager.pkgTabSetActive('oscreate');
-            var b = document.getElementById('LeftMenuPackages');
-            if (b != null) b.style.opacity = '';
-            var bo = document.getElementById('LeftMenuOsUpdates');
-            if (bo != null) bo.style.opacity = '1';
-            pluginHandler.pkgmanager.pkgCreateRender();
-        } catch (e) { console.log('pkgmanager os create open failed: ' + e); }
     };
 
     // v1.6.1: «Importa manifest…» — reads a meshos-fetch manifest.json in the
@@ -436,7 +432,7 @@ module.exports.pkgmanager = function (parent) {
             x += '<tr><td style="padding:4px">ID</td><td style="padding:4px"><input type=text id=pkgfId style=width:280px oninput="pluginHandler.pkgmanager.pkgCreateCheckId();pluginHandler.pkgmanager.pkgCreateDraftSync()"> <span id=pkgfIdHint style="color:#888"></span></td></tr>';
             x += '<tr><td style="padding:4px">Nome</td><td style="padding:4px"><input type=text id=pkgfName style=width:280px oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></td></tr>';
             x += '<tr><td style="padding:4px">Descrizione</td><td style="padding:4px"><input type=text id=pkgfDesc style=width:420px oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></td></tr>';
-            x += '<tr><td style="padding:4px">Categoria</td><td style="padding:4px"><select id=pkgfKind style=width:280px onchange="pluginHandler.pkgmanager.pkgCreateDraftSync()"><option value="">Applicazione (gestione pacchetti)</option><option value="os">Aggiornamento del sistema operativo (airgap)</option></select> <span style="color:#888;font-size:12px">gli aggiornamenti OS compaiono solo nella voce 🛡️ «Aggiornamenti OS»</span></td></tr>';
+            x += '<tr><td style="padding:4px">Categoria</td><td style="padding:4px"><select id=pkgfKind style=width:280px onchange="pluginHandler.pkgmanager.pkgCreateDraftSync()"><option value="">Applicazione (gestione pacchetti)</option></select> <span style="color:#888;font-size:12px">gli aggiornamenti OS non si creano a mano: nascono dalla scansione con «Scarica aggiornamenti» (voce 🛡️ «Aggiornamenti OS»)</span></td></tr>';
             x += '<tr><td style="padding:4px">Sistema operativo</td><td style="padding:4px"><select id=pkgfOs onchange="pluginHandler.pkgmanager.pkgCreateOsChange()"><option value=linux selected>Linux</option><option value=windows>Windows</option><option value=macos>macOS</option></select> <span id=pkgfOsHint style="color:#888"></span></td></tr>';
             x += '<tr><td style="padding:4px">Artefatto (file nello store)</td><td style="padding:4px"><input type=text id=pkgfArt style=width:280px oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"> <input type=button value="Carica artefatto…" onclick="pluginHandler.pkgmanager.pkgCreateUpload()"> <input type=button value="Elimina artefatto" onclick="pluginHandler.pkgmanager.pkgCreateArtifactDel()"></td></tr>';
             x += '<tr><td style="padding:4px">Tipo comando</td><td style="padding:4px"><select id=pkgfType onchange="pluginHandler.pkgmanager.pkgCreateDraftSync()"><option value=3>Shell (Linux/macOS)</option><option value=1>cmd.exe (Windows)</option><option value=2>PowerShell (Windows)</option></select> · Timeout (s): <input type=text id=pkgfTo style=width:70px value=300 oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></td></tr>';
@@ -451,8 +447,6 @@ module.exports.pkgmanager = function (parent) {
             // Restore the draft: tab re-open re-renders, typed data lives in memory.
             var db = window.pkgmanagerDraftBase;
             if (db != null) { Q('pkgfId').value = db.id || ''; Q('pkgfName').value = db.name || ''; Q('pkgfDesc').value = db.desc || ''; Q('pkgfKind').value = db.kind || ''; }
-            Q('pkgfKind').value = (pluginHandler.pkgmanager.pkgIsOsView() ? 'os' : Q('pkgfKind').value);
-            Q('pkgfKind').disabled = pluginHandler.pkgmanager.pkgIsOsView(); // v1.5.0: forced in the OS wizard
             var osCur = window.pkgmanagerDraftOs || 'linux';
             Q('pkgfOs').value = osCur;
             var dd = ((window.pkgmanagerDraft != null) ? window.pkgmanagerDraft[osCur] : null);
@@ -701,7 +695,7 @@ module.exports.pkgmanager = function (parent) {
             if ((cat == null) || (cat.packages == null)) { m.innerHTML = '<div style="color:#888">Caricamento catalogo…</div>'; return; }
             var isOs = pluginHandler.pkgmanager.pkgIsOsView();
             var x = '<div style="margin-bottom:8px;font-size:16px"><b>' + (isOs ? 'Gestione aggiornamenti' : 'Gestione pacchetti') + '</b> — ' + (isOs ? 'bundle OS airgap' : 'catalogo e artefatti airgap') + '</div>';
-            x += '<div style="margin-bottom:8px"><input type=button value="' + (isOs ? 'Aggiungi aggiornamento' : 'Aggiungi pacchetto') + '" onclick="pluginHandler.pkgmanager.pkgAdminAdd()"> <input type=button value="Ricarica catalogo" onclick="pluginHandler.pkgmanager.pkgAdminRefresh()"> ' + (isOs ? '<input type=button value="Importa manifest…" title="Importa un manifest.json generato da meshos-fetch (i file devono essere gia stati copiati nello store del server)" onclick="pluginHandler.pkgmanager.pkgOsImportManifest()">' : '') + '</div>';
+            x += '<div style="margin-bottom:8px">' + (isOs ? '' : '<input type=button value="Aggiungi pacchetto" onclick="pluginHandler.pkgmanager.pkgAdminAdd()"> ') + '<input type=button value="Ricarica catalogo" onclick="pluginHandler.pkgmanager.pkgAdminRefresh()"> ' + (isOs ? '<input type=button value="Importa manifest…" title="Importa un manifest.json generato da meshos-fetch (i file devono essere gia stati copiati nello store del server)" onclick="pluginHandler.pkgmanager.pkgOsImportManifest()">' : '') + '</div>';
             if ((window.pkgmanagerAdminMsg != null) && (window.pkgmanagerAdminMsg != '')) { x += '<div style="margin-bottom:8px;color:#080">' + EscapeHtml(window.pkgmanagerAdminMsg) + '</div>'; }
             x += '<table style="border-collapse:collapse;width:100%">';
             x += '<tr style="text-align:left;border-bottom:1px solid #ccc"><th style="padding:4px">Pacchetto</th><th style="padding:4px">Definizioni OS / artefatto</th><th style="padding:4px">Azioni</th></tr>';
@@ -804,12 +798,13 @@ module.exports.pkgmanager = function (parent) {
             var m = document.getElementById('pkgmanagerMain');
             if (m == null) return;
             var isNew = (pkg == null);
+            var osKindOpt = ((pkg != null) && (String(pkg.kind || '').trim() == 'os')) ? '<option value="os">Aggiornamento del sistema operativo (airgap)</option>' : '';
             var x = '<div style="margin-bottom:8px;font-size:16px"><b>' + (isNew ? 'Aggiungi pacchetto' : 'Modifica pacchetto') + '</b></div>';
             x += '<table style="border-collapse:collapse">';
             x += '<tr><td style="padding:4px">ID</td><td style="padding:4px"><input type=text id=pkgfId style=width:280px value="' + EscapeHtml(isNew ? '' : pkg.id) + '"' + (isNew ? '' : ' readonly') + '></td></tr>';
             x += '<tr><td style="padding:4px">Nome</td><td style="padding:4px"><input type=text id=pkgfName style=width:280px value="' + EscapeHtml(isNew ? '' : (pkg.name || '')) + '"></td></tr>';
             x += '<tr><td style="padding:4px">Descrizione</td><td style="padding:4px"><input type=text id=pkgfDesc style=width:420px value="' + EscapeHtml(isNew ? '' : (pkg.description || '')) + '"></td></tr>';
-            x += '<tr><td style="padding:4px">Categoria</td><td style="padding:4px"><select id=pkgfKind style=width:280px onchange="pluginHandler.pkgmanager.pkgAdminDraftSync()"><option value="">Applicazione (gestione pacchetti)</option><option value="os">Aggiornamento del sistema operativo (airgap)</option></select> <span style="color:#888;font-size:12px">gli aggiornamenti OS compaiono solo nella voce 🛡️ «Aggiornamenti OS»</span></td></tr>';
+            x += '<tr><td style="padding:4px">Categoria</td><td style="padding:4px"><select id=pkgfKind style=width:280px onchange="pluginHandler.pkgmanager.pkgAdminDraftSync()"><option value="">Applicazione (gestione pacchetti)</option>' + osKindOpt + '</select> <span style="color:#888;font-size:12px">gli aggiornamenti OS compaiono solo nella voce 🛡️ «Aggiornamenti OS» e non si creano a mano (scansione → Scarica aggiornamenti)</span></td></tr>';
             x += '</table>';
             // v0.9.1 single form: per-OS drafts seeded from the package, the OS
             // dropdown swaps the fields (same pattern as the builder).
@@ -842,7 +837,7 @@ module.exports.pkgmanager = function (parent) {
             x += '<div style="margin-top:10px"><input type=button value="Salva" onclick="pluginHandler.pkgmanager.pkgAdminSave(' + (isNew ? 'true' : 'false') + ')"> <input type=button value="Annulla" onclick="pluginHandler.pkgmanager.pkgAdminRender()"> <input type=file id="pkgfFile" style="display:none"></div>';
             x += '<div id="pkgadminStatus" style="margin-top:6px;color:#888"></div>';
             m.innerHTML = x;
-            Q('pkgfKind').value = ((pkg != null) && (pkg.kind != null)) ? String(pkg.kind) : (pluginHandler.pkgmanager.pkgIsOsView() ? 'os' : '');
+            Q('pkgfKind').value = ((pkg != null) && (pkg.kind != null)) ? String(pkg.kind) : '';
             pluginHandler.pkgmanager.pkgAdminOsHint();
         } catch (e) { console.log('pkgmanager admin form failed: ' + e); }
     };
@@ -1117,8 +1112,8 @@ module.exports.pkgmanager = function (parent) {
                 }
             }
             if ((window.pkgmanagerView == 'admin') || (window.pkgmanagerView == 'osadmin')) { pluginHandler.pkgmanager.pkgAdminRender(); }
-            else if ((window.pkgmanagerView == 'create') || (window.pkgmanagerView == 'oscreate')) { pluginHandler.pkgmanager.pkgCreateCatalogArrived(); }
-            else if (window.pkgmanagerView == 'os') { if (document.getElementById('pkgmanagerTableWrap') != null) { pluginHandler.pkgmanager.pkgOsTable(); } else { pluginHandler.pkgmanager.pkgOsRender(); } }
+            else if (window.pkgmanagerView == 'create') { pluginHandler.pkgmanager.pkgCreateCatalogArrived(); }
+            else if (window.pkgmanagerView == 'os') { if (document.getElementById('pkgmanagerTableWrap') != null) { pluginHandler.pkgmanager.pkgOsTable(); } else { pluginHandler.pkgmanager.pkgOsRender(); } if (message.opAck != null) { pluginHandler.pkgmanager.pkgMsg(message.opAck); } }
             else { pluginHandler.pkgmanager.pkgSidebarRender(); }
         } catch (e) { console.log('pkgmanager render failed: ' + e); }
     };
@@ -1215,11 +1210,12 @@ module.exports.pkgmanager = function (parent) {
             if (window.pkgmanagerSelPkg == null) { window.pkgmanagerSelPkg = {}; }
             var devlist = [];
             try { for (var j in nodes) { if (nodes[j] && nodes[j]._id) devlist.push(nodes[j]); } } catch (e) { }
+            var osfAdm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
             var x = '<div style="margin-bottom:8px;font-size:16px"><b>Aggiornamenti del sistema operativo</b> <span style="color:#888;font-weight:normal;font-size:12px">(airgap — bundle multi-file serviti da questo server in LAN)</span></div>';
             x += '<div id="pkgmanagerSelSummary" style="margin-bottom:8px;color:#888"></div>';
             x += '<div style="display:flex;gap:16px;align-items:flex-start">';
             x += '<div style="flex:1 1 60%;min-width:0"><div style="margin-bottom:4px"><b>Bundle di aggiornamento OS</b> <span id="pkgmanagerFilterNote" style="color:#888;font-weight:normal"></span> <span style="font-size:12px">[<a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(true);return false">tutti</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(false);return false">nessuno</a>]</span></div>';
-            x += '<div style="margin-bottom:6px"><input type=button value="Installa selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'install\')"> <input type=button value="Elimina selezionati" title="Esegue il comando di disinstallazione sui dispositivi selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'delete\')"> <input type=button value="Scansiona macchine" title="Raccoglie l inventario aggiornamenti da TUTTE le macchine online (Linux/Windows/macOS)" onclick="pluginHandler.pkgmanager.pkgOsScan()"> <input type=button value="Esporta report (.json)" title="Scarica il report della scansione: lo passi al downloader per ottenere gli aggiornamenti mancanti" onclick="pluginHandler.pkgmanager.pkgOsScanExport()"> <span id="pkgmanagerPkgSummary" style="color:#888;font-weight:normal"></span></div><div id="pkgmanagerTableWrap"></div></div>';
+            x += '<div style="margin-bottom:6px"><input type=button value="Installa selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'install\')"> <input type=button value="Elimina selezionati" title="Esegue il comando di disinstallazione sui dispositivi selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'delete\')"> <input type=button value="Scansiona macchine" title="Raccoglie l inventario aggiornamenti da TUTTE le macchine online (Linux/Windows/macOS)" onclick="pluginHandler.pkgmanager.pkgOsScan()"> ' + (osfAdm ? '<input type=button value="Scarica aggiornamenti" title="Il SERVER scarica dai repository vendor i pacchetti mancanti emersi dalla scansione (delta+dipendenze), li mette nello store e crea da solo il bundle OS — le macchine restano airgap" onclick="pluginHandler.pkgmanager.pkgOsFetchUpdates()"> ' : '') + '<input type=button value="Esporta report (.json)" title="Fallback: report della scansione per meshos-fetch (server senza accesso internet)" onclick="pluginHandler.pkgmanager.pkgOsScanExport()"> <span id="pkgmanagerPkgSummary" style="color:#888;font-weight:normal"></span></div><div id="pkgmanagerTableWrap"></div></div>';
             x += '<div style="flex:0 0 320px;border-left:1px solid #ddd;padding-left:12px">';
             x += '<div style="margin-bottom:4px"><b>Macchine di destinazione</b> — <span style="font-size:12px"><a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(true);return false">tutte</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(false);return false">nessuna</a></span></div>';
             x += '<div id="pkgmanagerDeviceList" style="max-height:420px;overflow-y:auto">';
@@ -1281,7 +1277,7 @@ module.exports.pkgmanager = function (parent) {
                 }
                 meshserver.send({ action: 'runcommands', nodeids: groups[os2], type: type, cmds: cmd, runAsUser: 0, reply: true, responseid: rid, timeout: 120 });
             }
-            pluginHandler.pkgmanager.pkgMsg('Scansione avviata su ' + machs.length + ' macchina/e online — inventari in arrivo, poi «Esporta report (.json)» per il downloader.');
+            pluginHandler.pkgmanager.pkgMsg('Scansione avviata su ' + machs.length + ' macchina/e online — inventari in arrivo, poi «Scarica aggiornamenti» per far scaricare i mancanti al server (amministratore).');
             pluginHandler.pkgmanager.pkgOsScanRender();
             pluginHandler.pkgmanager.pkgOsScanPoll();
         } catch (e) { console.log('pkgmanager os scan failed: ' + e); }
@@ -1332,7 +1328,7 @@ module.exports.pkgmanager = function (parent) {
                 try { delete d2runPending[run.rid]; } catch (e2) { }
                 run.done = true;
                 pluginHandler.pkgmanager.pkgOsScanRender();
-                pluginHandler.pkgmanager.pkgMsg('Scansione completata: ' + got + '/' + total + ' macchine — usa «Esporta report (.json)» e passalo al downloader per gli aggiornamenti mancanti.');
+                pluginHandler.pkgmanager.pkgMsg('Scansione completata: ' + got + '/' + total + ' macchine — «Scarica aggiornamenti» fa scaricare i pacchetti mancanti al server e crea il bundle da solo.');
             }
         } catch (e) { console.log('pkgmanager os scan poll failed: ' + e); }
     };
@@ -1354,7 +1350,7 @@ module.exports.pkgmanager = function (parent) {
                 x += '<tr><td style="padding:4px">' + EscapeHtml(m.name) + '</td><td style="padding:4px">' + EscapeHtml(m.os) + '</td><td style="padding:4px">' + EscapeHtml(ver) + '</td><td style="padding:4px">' + m.items.length + '</td><td style="padding:4px">' + (m.got ? '<span style="color:#080">inventario ✓</span>' : '<span style="color:#888">in attesa…</span>') + '</td></tr>';
             }
             x += '</table>';
-            if (run.done) { x += '<div style="color:#888;font-size:12px;margin-top:4px">Scansione completata — «Esporta report (.json)» scarica l inventario completo per il downloader.</div>'; }
+            if (run.done) { x += '<div style="color:#888;font-size:12px;margin-top:4px">Scansione completata — «Scarica aggiornamenti» scarica i mancanti direttamente sul server (le macchine restano airgap); «Esporta report (.json)» resta come fallback per meshos-fetch.</div>'; }
             el.innerHTML = (any ? x : '');
         } catch (e) { console.log('pkgmanager os scan render failed: ' + e); }
     };
@@ -1369,7 +1365,7 @@ module.exports.pkgmanager = function (parent) {
                 var m = run.machs[nid];
                 machines.push({ id: nid, name: m.name, os: m.os, osInfo: { name: ((m.info != null) && (m.info.length > 0)) ? m.info[0] : '', version: ((m.info != null) && (m.info.length > 1)) ? m.info[1] : '', codename: ((m.info != null) && (m.info.length > 2)) ? m.info[2] : '' }, items: m.items.slice(0) });
             }
-            var report = { tool: 'pkgmanager', pluginVersion: '1.6.0', generated: new Date().toISOString(), machines: machines };
+            var report = { tool: 'pkgmanager', pluginVersion: '1.7.0', generated: new Date().toISOString(), machines: machines };
             var blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
             var a = document.createElement('a');
             var d = new Date();
@@ -1377,8 +1373,36 @@ module.exports.pkgmanager = function (parent) {
             a.download = 'os-scan-' + d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2) + '-' + ('0' + d.getHours()).slice(-2) + ('0' + d.getMinutes()).slice(-2) + '.json';
             document.body.appendChild(a); a.click();
             setTimeout(function () { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) { } }, 2000);
-            pluginHandler.pkgmanager.pkgMsg('Report esportato (' + machines.length + ' macchine) — passalo a meshos-fetch sulla macchina con internet.');
+            pluginHandler.pkgmanager.pkgMsg('Report esportato (' + machines.length + ' macchine) — fallback meshos-fetch: il percorso principale è «Scarica aggiornamenti» nel server.');
         } catch (e) { pluginHandler.pkgmanager.pkgMsg('Esportazione fallita: ' + e); }
+    };
+
+    // v1.7.0: «Scarica aggiornamenti» — the INTEGRATED downloader. Sends the
+    // completed scan inventory to the server, which fetches the vendor
+    // indexes, computes the missing updates per Linux machine (delta +
+    // dependency closure), downloads the .deb files DIRECTLY into
+    // store/<bundle-id>/ and builds+saves the kind:'os' bundle by itself
+    // (through the v1.6.1 import path: every file re-verified server-side,
+    // admin-guarded). The managed machines never touch the internet —
+    // installs keep flowing from THIS server over the LAN. Windows/macOS
+    // machines come back as "skipped" in the bundle description (best
+    // effort: meshos-fetch.js --kb/--macos stays the fallback).
+    obj.pkgOsFetchUpdates = function () {
+        try {
+            var run = window.pkgmanagerOsScan;
+            if ((run == null) || (!run.done)) { pluginHandler.pkgmanager.pkgMsg('Nessuna scansione completata: prima fai «Scansiona macchine».'); return; }
+            var pid = prompt('ID del bundle OS da creare nello store (cartella plugins/pkgmanager/store/):', 'os-updates');
+            if ((pid == null) || (String(pid).trim() == '')) { pluginHandler.pkgmanager.pkgMsg('Download annullato.'); return; }
+            var nm = prompt('Nome del bundle (mostrato nelle liste):', 'Aggiornamenti OS (scansione)');
+            if ((nm == null) || (String(nm).trim() == '')) { nm = 'Aggiornamenti OS'; }
+            var machines = [];
+            for (var nid in run.machs) {
+                var m = run.machs[nid];
+                machines.push({ id: nid, name: m.name, os: m.os, osInfo: { name: ((m.info != null) && (m.info.length > 0)) ? m.info[0] : '', version: ((m.info != null) && (m.info.length > 1)) ? m.info[1] : '', codename: ((m.info != null) && (m.info.length > 2)) ? m.info[2] : '' }, items: m.items.slice(0) });
+            }
+            meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'osfetch', pkgid: String(pid).trim(), name: String(nm).trim(), machines: machines });
+            pluginHandler.pkgmanager.pkgMsg('Download server-side avviato: il server scarica i pacchetti mancanti (delta+dipendenze) dai repository vendor e crea il bundle da solo — attendi l esito qui.');
+        } catch (e) { pluginHandler.pkgmanager.pkgMsg('Download fallito: ' + e); }
     };
 
     obj.pkgOsTable = function () {
@@ -1748,7 +1772,7 @@ module.exports.pkgmanager = function (parent) {
             var arts = [];
             for (var i = 0; (i < def.artifacts.length) && (arts.length < 32); i++) {
                 var nm = String(def.artifacts[i]).trim();
-                if ((nm != '') && (/^[a-zA-Z0-9._-]+$/.test(nm))) { arts.push(nm); }
+                if ((nm != '') && (/^[a-zA-Z0-9._+~:-]+$/.test(nm))) { arts.push(nm); }
             }
             if (arts.length > 0) { out.artifacts = arts; }
         }
@@ -1800,6 +1824,130 @@ module.exports.pkgmanager = function (parent) {
 
         if (command.pluginaction == 'list') { obj.replyCatalog(session, null, null); return; }
 
+        // v1.7.0: «Scarica aggiornamenti» — INTEGRATED downloader. The SERVER
+        // (this process) fetches the vendor indexes, computes the missing
+        // updates for every Linux machine from the scan inventory (delta +
+        // dependency closure, dpkg version compare when available), downloads
+        // the .deb files DIRECTLY into store/<bundle-id>/ and then re-enters
+        // serveraction as 'importmanifest' so every file is re-verified and
+        // the kind:'os' bundle is built+saved through the normal admin-
+        // guarded path. Managed machines never touch the internet — installs
+        // keep flowing from THIS server over the LAN. Windows/macOS machines
+        // are reported as skipped (best effort: meshos-fetch.js --kb/--macos).
+        if (command.pluginaction == 'osfetch') {
+            if (!isAdmin) { console.log('pkgmanager[server]: denied osfetch for user ' + command.userid + ' (not full site admin)'); deny(); return; }
+            var fmachs = command.machines;
+            if ((fmachs == null) || (Array.isArray(fmachs) !== true) || (fmachs.length === 0)) { obj.replyCatalog(session, null, 'Nessuna macchina nella scansione: prima fai «Scansiona macchine» dalla vista Aggiornamenti OS.'); return; }
+            var fid = String(command.pkgid || '');
+            if (!/^[a-zA-Z0-9._-]+$/.test(fid)) { obj.replyCatalog(session, null, 'ID bundle non valido (lettere, numeri, . _ -).'); return; }
+            var fmax = parseInt(command.maxfiles, 10); if (!(fmax > 0)) { fmax = 0; }
+            var fskipped = [];
+            (async function () {
+                try {
+                    var fget = async function (url) { var r = await fetch(url, { headers: { 'User-Agent': 'MeshCentral-pkgmanager/1.7.0' } }); if (!r.ok) { throw new Error('HTTP ' + r.status + ' ' + url); } return Buffer.from(await r.arrayBuffer()); };
+                    var fhasDpkg = false; try { if (childProcess != null) { childProcess.execFileSync('dpkg', ['--version'], { stdio: 'ignore' }); fhasDpkg = true; } } catch (e) { }
+                    var fverGe = function (a, b) { if (a === b) { return true; } if (fhasDpkg) { try { childProcess.execFileSync('dpkg', ['--compare-versions', String(a), 'ge', String(b)], { stdio: 'ignore' }); return true; } catch (e) { return false; } } return (String(a) >= String(b)); };
+                    var fparseIdx = function (txt) { var idx = {}; var st = String(txt).split('\n\n'); for (var s = 0; s < st.length; s++) { var o = {}; var ls = st[s].split('\n'); for (var l = 0; l < ls.length; l++) { var c = ls[l].indexOf(':'); if (c > 0) { var k = ls[l].slice(0, c).trim(); var v = ls[l].slice(c + 1).trim(); if (!(k in o)) { o[k] = v; } } } if (o.Package && o.Version && (o.Architecture === 'amd64' || o.Architecture === 'all') && o.Filename) { if (idx[o.Package] == null) { idx[o.Package] = []; } idx[o.Package].push(o); } } return idx; };
+                    var fbest = function (arr) { var b = arr[0]; for (var i = 0; i < arr.length; i++) { if (fverGe(arr[i].Version, b.Version)) { b = arr[i]; } } return b; };
+                    var fdeps = function (st) { var out = []; var gs = String(st || '').split(','); for (var g = 0; g < gs.length; g++) { var t = gs[g].trim(); if (t == '') { continue; } var alts = t.split('|'); var names = []; for (var a = 0; a < alts.length; a++) { var n0 = alts[a].trim().split(/[ (]/)[0].trim(); if (n0 != '') { names.push(n0); } } if (names.length > 0) { out.push(names); } } return out; };
+                    var fidxCache = {};
+                    var fIndex = async function (codename) {
+                        if (fidxCache[codename] != null) { return fidxCache[codename]; }
+                        var idx = {};
+                        var pockets = ['https://security.ubuntu.com/ubuntu/dists/' + codename + '-security', 'https://archive.ubuntu.com/ubuntu/dists/' + codename + '-updates'];
+                        var areas = ['main', 'universe'];
+                        for (var p = 0; p < pockets.length; p++) {
+                            for (var ar = 0; ar < areas.length; ar++) {
+                                var url = pockets[p] + '/' + areas[ar] + '/binary-amd64/Packages.gz';
+                                var txt = null;
+                                try { txt = zlib.gunzipSync(await fget(url)).toString('utf8'); } catch (e) { try { txt = zlib.gunzipSync(await fget(url.replace('https://', 'http://'))).toString('utf8'); } catch (e2) { } }
+                                if (txt == null) { fskipped.push({ machine: '(indice)', reason: 'indice vendor non raggiungibile: ' + url }); continue; }
+                                var sub = fparseIdx(txt);
+                                for (var nm in sub) { if (idx[nm] == null) { idx[nm] = []; } for (var q = 0; q < sub[nm].length; q++) { idx[nm].push(sub[nm][q]); } }
+                            }
+                        }
+                        fidxCache[codename] = idx;
+                        return idx;
+                    };
+                    var fdone = {};
+                    for (var mi = 0; mi < fmachs.length; mi++) {
+                        var mm = fmachs[mi];
+                        var mos = String((mm != null) ? (mm.os || '') : '').toLowerCase();
+                        if ((mos == 'windows') || (mos == 'macos') || (mos == 'darwin')) { fskipped.push({ machine: String((mm != null) ? (mm.name || '') : '?'), reason: ((mos == 'windows') ? 'windows: best effort — usa meshos-fetch --kb / WSUS (i KB mancanti non sono deducibili dalla sola scansione)' : 'macos: best effort — usa meshos-fetch --macos <versione> (combo Apple)') }); continue; }
+                        var codename = String(((mm != null) && (mm.osInfo != null) && (mm.osInfo.codename != null)) ? String(mm.osInfo.codename).trim() : '');
+                        if (codename == '') { fskipped.push({ machine: String((mm != null) ? (mm.name || '') : '?'), reason: 'codename assente nell inventario (scansione vecchia?)' }); continue; }
+                        var installed = {};
+                        var its = ((mm != null) && Array.isArray(mm.items)) ? mm.items : [];
+                        for (var ii = 0; ii < its.length; ii++) { var sp = String(its[ii]).indexOf(' '); if (sp > 0) { installed[String(its[ii]).slice(0, sp)] = String(its[ii]).slice(sp + 1).trim(); } }
+                        console.log('pkgmanager[server]: osfetch linux ' + String(((mm != null) ? (mm.name || '') : '?')) + ': ' + Object.keys(installed).length + ' pacchetti installati (Ubuntu ' + codename + ')');
+                        var idx = await fIndex(codename);
+                        var queue = []; var queued = {};
+                        var pushP = function (name, reason) { var stz = idx[name]; if (stz == null) { return; } var cand = fbest(stz); var key = name + '_' + cand.Version; if (queued[key] != null) { return; } queued[key] = 1; queue.push({ name: name, reason: reason, st: cand }); };
+                        for (var iname in installed) { var st2 = idx[iname]; if (st2 == null) { continue; } var cand2 = fbest(st2); if (!fverGe(installed[iname], cand2.Version)) { pushP(iname, 'aggiornamento disponibile'); } }
+                        var seen = {}; for (var qk in queued) { seen[qk] = 1; }
+                        var frontier = queue.slice(0);
+                        while (frontier.length > 0) {
+                            var next = [];
+                            for (var f = 0; f < frontier.length; f++) {
+                                var depgs = fdeps(String((frontier[f].st.Depends || '') + ',' + (frontier[f].st['Pre-Depends'] || '')));
+                                for (var dg = 0; dg < depgs.length; dg++) {
+                                    var pick = null;
+                                    for (var da = 0; da < depgs[dg].length; da++) { if (idx[depgs[dg][da]] != null) { pick = depgs[dg][da]; break; } }
+                                    if (pick == null) { continue; }
+                                    if (installed[pick] != null) { continue; }
+                                    if (seen[pick] != null) { continue; }
+                                    seen[pick] = 1;
+                                    var stz2 = fbest(idx[pick]);
+                                    var kz = pick + '_' + stz2.Version;
+                                    if (queued[kz] != null) { continue; }
+                                    queued[kz] = 1;
+                                    var item = { name: pick, reason: 'dipendenza di ' + frontier[f].name, st: stz2 };
+                                    queue.push(item); next.push(item);
+                                }
+                            }
+                            frontier = next;
+                        }
+                        console.log('pkgmanager[server]: osfetch ' + String(((mm != null) ? (mm.name || '') : '?')) + ': delta+dipendenze = ' + queue.length + ' pacchetti');
+                        for (var qi = 0; qi < queue.length; qi++) {
+                            var qe = queue[qi];
+                            var key2 = qe.name + '_' + qe.st.Version;
+                            if (fdone[key2] == null) { fdone[key2] = { package: qe.name, version: qe.st.Version, file: qe.name + '_' + qe.st.Version + '_' + (qe.st.Architecture || 'amd64') + '.deb', url: 'http://security.ubuntu.com/ubuntu/' + qe.st.Filename, origUrl: 'http://archive.ubuntu.com/ubuntu/' + qe.st.Filename, size: parseInt(qe.st.Size || '0', 10), sha384: null, targets: {} }; }
+                            fdone[key2].targets[String((mm != null) ? (mm.id || mm.name || '') : '')] = 1;
+                        }
+                    }
+                    var list = []; for (var lk in fdone) { list.push(fdone[lk]); }
+                    list.sort(function (a, b) { return (a.size || 0) - (b.size || 0); });
+                    var storeDir = parent.path.join(obj.storePath, fid);
+                    try { parent.fs.mkdirSync(storeDir, { recursive: true }); } catch (e) { }
+                    var files = [];
+                    for (var d = 0; d < list.length; d++) {
+                        var e = list[d];
+                        if ((fmax > 0) && (files.length >= fmax)) { fskipped.push({ file: e.file, reason: 'cap raggiunto (' + fmax + ' file — per il resto riesegui senza limite)' }); continue; }
+                        var buf = null;
+                        try { buf = await fget(e.origUrl); } catch (e1) { try { buf = await fget(e.url); } catch (e2) { } }
+                        if (buf == null) { fskipped.push({ file: e.file, reason: 'download fallito (' + e.origUrl + ')' }); continue; }
+                        parent.fs.writeFileSync(parent.path.join(storeDir, e.file), buf);
+                        e.sha384 = crypto.createHash('sha384').update(buf).digest('hex');
+                        e.size = buf.length;
+                        var tg = []; for (var t in e.targets) { tg.push(t); }
+                        files.push({ os: 'linux', package: e.package, version: e.version, file: e.file, sha384: e.sha384, size: buf.length, targets: tg });
+                        console.log('pkgmanager[server]: osfetch ok ' + e.file + ' (' + Math.round(buf.length / 1024) + 'KB)');
+                    }
+                    if (files.length === 0) {
+                        var reasons = fskipped.slice(0, 3).map(function (s) { return String((s.machine || s.file || '?') + ': ' + s.reason); }).join(' | ');
+                        obj.replyCatalog(session, null, 'Nessun aggiornamento scaricato' + ((fskipped.length > 0) ? (' — ' + fskipped.length + ' saltati: ' + reasons) : ' (macchine gia aggiornate?)'));
+                        return;
+                    }
+                    console.log('pkgmanager[server]: osfetch -> import ' + fid + ' (' + files.length + ' file, ' + fskipped.length + ' saltati)');
+                    obj.serveraction({ pluginaction: 'importmanifest', userid: command.userid, pkgid: fid, name: String(command.name || fid), manifest: { tool: 'pkgmanager-osfetch', version: '1.7', generated: new Date().toISOString(), files: files, skipped: fskipped } }, session, parent2);
+                } catch (err) {
+                    console.log('pkgmanager[server]: osfetch error: ' + err);
+                    try { obj.replyCatalog(session, null, 'Download aggiornamenti fallito: ' + err); } catch (e3) { }
+                }
+            })();
+            return;
+        }
+
         // v1.6.1: import a meshos-fetch manifest into a kind:'os' bundle.
         // Verifies every file already exists in store/<pkgid>/, builds the
         // per-OS bundle defs (artifacts[] + chained install commands with
@@ -1815,7 +1963,7 @@ module.exports.pkgmanager = function (parent) {
             for (var fi = 0; fi < man.files.length; fi++) {
                 var fe = man.files[fi];
                 var fname = String((fe != null) ? (fe.file || '') : '');
-                if (!/^[a-zA-Z0-9._-]+$/.test(fname)) { missing.push(((fname || '(vuoto)') + ' (nome non valido)')); continue; }
+                if (!/^[a-zA-Z0-9._+~:-]+$/.test(fname)) { missing.push(((fname || '(vuoto)') + ' (nome non valido)')); continue; }
                 var full = parent.path.join(obj.storePath, pkgid, fname);
                 if (!parent.fs.existsSync(full)) { missing.push(fname); continue; }
                 var os2 = String((fe != null) ? (fe.os || '') : '');
@@ -1826,7 +1974,10 @@ module.exports.pkgmanager = function (parent) {
                 byOs[os2].push(fe);
             }
             if (missing.length > 0) { obj.replyCatalog(session, null, 'File mancanti nello store — copiali in plugins/pkgmanager/store/' + pkgid + '/: ' + missing.join(', ')); return; }
-            var pkgB = { id: pkgid, name: String(command.name || pkgid), description: 'Bundle OS importato da meshos-fetch (' + String((man.generated != null) ? man.generated : '') + ') — airgap', kind: 'os' };
+            var isOsf = (String((man != null) ? (man.tool || '') : '') == 'pkgmanager-osfetch');
+            var skipN = (Array.isArray(man.skipped) ? man.skipped.length : 0);
+            var descOsf = 'Aggiornamenti OS scaricati dal server: ' + man.files.length + ' file (delta+dipendenze dalla scansione' + ((skipN > 0) ? (', ' + skipN + ' saltati: ' + String(man.skipped.slice(0, 2).map(function (s) { return String((s.machine || s.file || '?') + ' — ' + s.reason); }).join(' | ')).slice(0, 220)) : '') + ') — installazione airgap dalla LAN';
+            var pkgB = { id: pkgid, name: String(command.name || pkgid), description: (isOsf ? descOsf : ('Bundle OS importato da meshos-fetch (' + String((man.generated != null) ? man.generated : '') + ') — airgap')), kind: 'os' };
             for (var osk in byOs) {
                 var fl = byOs[osk];
                 if (fl.length === 0) continue;
