@@ -1,5 +1,5 @@
 /**
- * MeshCentral Package Manager plugin ("pkgmanager") — v1.2.1.
+ * MeshCentral Package Manager plugin ("pkgmanager") — v1.3.0.
  *
  * Design: the catalog lives server-side (catalog.json next to this file).
  * The plugin pages are TABS IN THE TOP GRAY BAR (their own
@@ -34,6 +34,12 @@
  *     BUILDER (v0.9.0) — ONE single form with an OS dropdown (like the
  *     other options): switching OS swaps artifact/type/timeout/command
  *     fields and a per-OS draft in memory never loses anything. Airgap
+ *     v1.3.0 OS-UPDATE BUNDLES (airgap): a package can carry MULTIPLE
+ *     store files per OS (space/comma separated list in the artifact field):
+ *     every file gets its own LAN download + SHA-384 verification line with
+ *     an INDEXED placeholder ({{url:N}}/{{sha384:N}}); the preset chains all
+ *     downloads + installers (.deb/.rpm/.apk, .msi/.msu/.cab, .pkg/.app) in
+ *     one command and generates the multi-file uninstall where automatable.
  *     presets per artifact extension, {{url}}/{{sha384}} insertion at the
  *     cursor, artifact upload, live ID check. Save MERGES: drafted defs +
  *     defs already saved for that ID (the wizard never silently drops a
@@ -76,7 +82,7 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '1.2.1';
+    obj.version = '1.3.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -401,7 +407,11 @@ module.exports.pkgmanager = function (parent) {
                     if ((d != null) && (d.cmd != null) && (d.cmd.trim() != '')) {
                         var def = { type: (parseInt(d.type) || pluginHandler.pkgmanager.pkgCreateDefaultType(k)), cmd: d.cmd.trim() };
                         var to = parseInt(d.to); if (to > 0) { def.timeout = to; }
-                        if ((d.art != null) && (d.art.trim() != '')) { def.artifact = d.art.trim(); }
+                        if ((d.art != null) && (d.art.trim() != '')) {
+                            // v1.3.0: a multi-name field builds a bundle list.
+                            var an = d.art.trim().split(/[\s,]+/).filter(function (x) { return x != ''; });
+                            if (an.length > 1) { def.artifacts = an; } else { def.artifact = an[0]; }
+                        }
                         if ((d.un != null) && (d.un.trim() != '')) { def.uninstall = d.un.trim(); }
                         pkg[k] = def;
                     }
@@ -434,42 +444,57 @@ module.exports.pkgmanager = function (parent) {
     // download from THIS server over LAN ({{url}}), SHA-384 verification
     // ({{sha384}}), then the local install step. The generated command is a
     // starting point — the admin can edit it before saving.
+    // v1.3.0: bundle preset — the artifact field accepts a space/comma
+    // separated list of store files (OS-update bundles: multiple .deb/.rpm,
+    // .msu/.cab, .pkg). Every file gets its own LAN download + SHA-384
+    // verification with an INDEXED placeholder ({{url:N}}/{{sha384:N}});
+    // single-file packages also keep the legacy {{url}}/{{sha384}} (= N 1).
+    // Installers run chained in one command; the per-extension uninstall
+    // covers every file where it is automatable.
     obj.pkgCreatePreset = function (os) {
         try {
             if (os == null) { os = pluginHandler.pkgmanager.pkgCreateCurOs(); }
-            var art = Q('pkgfArt').value.trim();
-            var a = (art != '') ? art : 'pacchetto';
-            var base = ((a.indexOf('.') > 0) ? a.slice(0, a.lastIndexOf('.')) : a);
-            var ext = a.slice(a.lastIndexOf('.') + 1).toLowerCase();
-            var cmd = '', un = '', unNote = '';
-            if (os == 'linux') {
-                var inst = 'sh /tmp/' + a;
-                if (ext == 'deb') { inst = 'sudo -n dpkg -i /tmp/' + a; un = 'sudo -n dpkg -r ' + base; }
-                else if (ext == 'rpm') { inst = 'sudo -n rpm -Uvh --force /tmp/' + a; un = 'sudo -n rpm -e ' + base; }
-                else if (ext == 'apk') { inst = 'sudo -n apk add --allow-untrusted /tmp/' + a; un = 'sudo -n apk del ' + base; }
-                else { unNote = ' — disinstallazione non automatizzabile per .' + ext + ', scrivila a mano (è obbligatoria)'; }
-                cmd = "curl -kfsSL -o /tmp/" + a + " '{{url}}' && echo '{{sha384}}  /tmp/" + a + "' | sha384sum -c - && " + inst;
-                Q('pkgfType').value = '3';
-            } else if (os == 'windows') {
-                var inst = '"%TEMP%\\' + a + '" /S';
-                if (ext == 'msi') { inst = 'msiexec /i "%TEMP%\\' + a + '" /qn'; un = 'msiexec /x "%TEMP%\\' + a + '" /qn'; }
-                else { unNote = ' — disinstallazione non automatizzabile per .' + ext + ', scrivila a mano (è obbligatoria)'; }
-                cmd = 'curl -kfsSL -o "%TEMP%\\' + a + '" "{{url}}" && certutil -hashfile "%TEMP%\\' + a + '" SHA384 | findstr /i "{{sha384}}" && ' + inst;
-                Q('pkgfType').value = '1';
-            } else {
-                var inst = 'sh /tmp/' + a;
-                if (ext == 'pkg') { inst = 'sudo -n installer -pkg /tmp/' + a + ' -target /'; un = 'sudo -n pkgutil --forget ' + base; }
-                else if (ext == 'app') { inst = 'cp -R /tmp/' + a + ' /Applications/'; un = 'sudo -n rm -rf "/Applications/' + base + '.app"'; }
-                else { unNote = ' — disinstallazione non automatizzabile per .' + ext + ', scrivila a mano (è obbligatoria)'; }
-                cmd = "curl -kfsSL -o /tmp/" + a + " '{{url}}' && echo '{{sha384}}  /tmp/" + a + "' | shasum -a 384 -c - && " + inst;
-                Q('pkgfType').value = '3';
+            var field = Q('pkgfArt').value.trim();
+            var names = field.split(/[\s,]+/).filter(function (x) { return x != ''; });
+            if (names.length == 0) { names = ['pacchetto']; }
+            var parts = [], insts = [], uns = [], manualUn = false;
+            for (var i = 0; i < names.length; i++) {
+                var a = names[i];
+                var dot = a.lastIndexOf('.');
+                var b = ((dot > 0) ? a.slice(0, dot) : a);
+                var e = ((dot > 0) ? a.slice(dot + 1).toLowerCase() : '');
+                var idx = i + 1;
+                if (os == 'linux') {
+                    parts.push("curl -kfsSL -o /tmp/" + a + " '{{url:" + idx + "}}' && echo '{{sha384:" + idx + "}}  /tmp/" + a + "' | sha384sum -c -");
+                    if (e == 'deb') { insts.push('sudo -n dpkg -i /tmp/' + a); uns.push('sudo -n dpkg -r ' + b); }
+                    else if (e == 'rpm') { insts.push('sudo -n rpm -Uvh --force /tmp/' + a); uns.push('sudo -n rpm -e ' + b); }
+                    else if (e == 'apk') { insts.push('sudo -n apk add --allow-untrusted /tmp/' + a); uns.push('sudo -n apk del ' + b); }
+                    else { insts.push('sh /tmp/' + a); manualUn = true; }
+                } else if (os == 'windows') {
+                    var dst = '"%TEMP%\\' + a + '"';
+                    parts.push('curl -kfsSL -o ' + dst + ' "{{url:' + idx + '}}" && certutil -hashfile ' + dst + ' SHA384 | findstr /i "{{sha384:' + idx + '}}"');
+                    if (e == 'msi') { insts.push('msiexec /i ' + dst + ' /qn'); uns.push('msiexec /x ' + dst + ' /qn'); }
+                    else if (e == 'msu') { insts.push('wusa ' + dst + ' /quiet /norestart'); uns.push('wusa ' + dst + ' /uninstall /quiet /norestart'); }
+                    else if (e == 'cab') { insts.push('dism /Online /Add-Package /PackagePath:' + dst + ' /NoRestart /Quiet'); manualUn = true; }
+                    else { insts.push(dst + ' /S'); manualUn = true; }
+                } else {
+                    parts.push("curl -kfsSL -o /tmp/" + a + " '{{url:" + idx + "}}' && echo '{{sha384:" + idx + "}}  /tmp/" + a + "' | shasum -a 384 -c -");
+                    if (e == 'pkg') { insts.push('sudo -n installer -pkg /tmp/' + a + ' -target /'); uns.push('sudo -n pkgutil --forget ' + b); }
+                    else if (e == 'app') { insts.push('cp -R /tmp/' + a + ' /Applications/'); uns.push('sudo -n rm -rf "/Applications/' + b + '.app"'); }
+                    else { insts.push('sh /tmp/' + a); manualUn = true; }
+                }
             }
+            var cmd = parts.join(' && ');
+            if (insts.length > 0) { cmd += ' && ' + insts.join(' && '); }
+            var un = uns.join(((os == 'windows') ? ' & ' : ' ; '));
+            var unNote = ((manualUn) ? ' — disinstallazione non automatizzabile per alcuni file di questo elenco, completala a mano (è obbligatoria)' : '');
+            Q('pkgfType').value = ((os == 'windows') ? '1' : '3');
             Q('pkgfCmd').value = cmd;
             Q('pkgfUn').value = un;
             pluginHandler.pkgmanager.pkgCreateDraftSync();
             pluginHandler.pkgmanager.pkgAdminDraftSync();
             if (window.pkgmanagerView == 'admin') { pluginHandler.pkgmanager.pkgAdminOsHint(); } else { pluginHandler.pkgmanager.pkgCreateOsHint(); }
-            pluginHandler.pkgmanager.pkgAdminStatus('Preset ' + os + ' generato: installazione' + ((un != '') ? ' + disinstallazione' : ' (solo installazione)') + ((art == '') ? ' (nome artefatto vuoto: usato "pacchetto" — compila il campo e rigenera per il nome giusto)' : ' (' + EscapeHtml(art) + ')') + unNote + '. Controlla i comandi prima di salvare.');
+            pluginHandler.pkgmanager.pkgAdminStatus('Preset ' + os + ' generato (' + names.length + ' file): download LAN + verifica SHA-384 per file + installazione' + ((un != '') ? ' + disinstallazione' : ' (solo installazione)') + ((field == '') ? ' (campo artefatto vuoto: usato "pacchetto" — compila e rigenera)' : '') + unNote + '. Controlla i comandi prima di salvare.');
         } catch (e) { pluginHandler.pkgmanager.pkgAdminStatus('Preset fallito: ' + e); }
     };
 
@@ -644,7 +669,8 @@ module.exports.pkgmanager = function (parent) {
                 var os = oses[k][0];
                 var def = ((pkg != null) ? pkg[os] : null);
                 if (def != null) {
-                    draft[os] = { art: ((def.artifact != null) ? String(def.artifact) : ''), type: String(def.type), to: ((def.timeout != null) ? String(def.timeout) : '300'), cmd: String(def.cmd || ''), un: ((def.uninstall != null) ? String(def.uninstall) : '') };
+                    var seedArt = ((def.artifacts != null) && (def.artifacts.length > 0)) ? def.artifacts.join(' ') : ((def.artifact != null) ? String(def.artifact) : '');
+                    draft[os] = { art: seedArt, type: String(def.type), to: ((def.timeout != null) ? String(def.timeout) : '300'), cmd: String(def.cmd || ''), un: ((def.uninstall != null) ? String(def.uninstall) : '') };
                     if (osCur == '') { osCur = os; }
                 }
             }
@@ -699,7 +725,17 @@ module.exports.pkgmanager = function (parent) {
             if (artInput == null) { artInput = document.getElementById('pkgfArt'); } // v0.9.0 single-form wizard
             if (artInput == null) { pluginHandler.pkgmanager.pkgAdminStatus('Campo artefatto mancante.'); return; }
             var art = artInput.value.trim();
-            if (art == '') { art = f.files[0].name; artInput.value = art; }
+            // v1.3.0: the field may hold a space/comma separated bundle
+            // list — the PICKED file is uploaded under its own name and
+            // appended to the list.
+            var pickName = f.files[0].name;
+            if (!/^[a-zA-Z0-9._-]+$/.test(art)) {
+                var lst = art.split(/[\s,]+/).filter(function (x) { return x != ''; });
+                if (lst.indexOf(pickName) < 0) { lst.push(pickName); }
+                artInput.value = lst.join(' ');
+                art = pickName;
+            }
+            if (art == '') { art = pickName; artInput.value = art; }
             if (!/^[a-zA-Z0-9._-]+$/.test(pid) || !/^[a-zA-Z0-9._ -]+$/.test(art)) { pluginHandler.pkgmanager.pkgAdminStatus('ID o nome artefatto non validi.'); return; }
             var fname = f.files[0].name;
             f.files[0].arrayBuffer().then(function (buf) {
@@ -722,14 +758,25 @@ module.exports.pkgmanager = function (parent) {
             if (artInput == null) { artInput = document.getElementById('pkgfArt'); } // v0.9.0 single-form wizard
             if (artInput == null) { pluginHandler.pkgmanager.pkgAdminStatus('Campo artefatto mancante.'); return; }
             var art = artInput.value.trim();
-            if (!/^[a-zA-Z0-9._-]+$/.test(pid) || !/^[a-zA-Z0-9._ -]+$/.test(art) || (art == '')) { pluginHandler.pkgmanager.pkgAdminStatus('ID o nome artefatto non validi.'); return; }
-            fetch('/pkgstore.ashx?op=del&p=' + encodeURIComponent(pid + '/' + art), { method: 'POST' })
-                .then(function (r) { return r.json(); })
-                .then(function (j) {
-                    if (j.ok) { artInput.value = ''; pluginHandler.pkgmanager.pkgCreateDraftSync(); pluginHandler.pkgmanager.pkgAdminDraftSync(); }
-                    pluginHandler.pkgmanager.pkgAdminStatus(j.ok ? 'Artefatto eliminato dallo store: ' + art : 'Eliminazione fallita: ' + EscapeHtml(String(j.error || '')));
-                })
-                .catch(function (e2) { pluginHandler.pkgmanager.pkgAdminStatus('Eliminazione fallita: ' + e2); });
+            // v1.3.0: a bundle list deletes EVERY named file, then clears.
+            var names = art.split(/[\s,]+/).filter(function (x) { return x != ''; });
+            if (!/^[a-zA-Z0-9._-]+$/.test(pid) || (names.length == 0) || names.some(function (x) { return !/^[a-zA-Z0-9._-]+$/.test(x); })) { pluginHandler.pkgmanager.pkgAdminStatus('ID o nome artefatto non validi.'); return; }
+            var left = names.length, gone = 0;
+            for (var d = 0; d < names.length; d++) {
+                (function (nm) {
+                    fetch('/pkgstore.ashx?op=del&p=' + encodeURIComponent(pid + '/' + nm), { method: 'POST' })
+                        .then(function (r) { return r.json(); })
+                        .then(function (j) { if (j.ok) { gone++; } })
+                        .catch(function (e2) { })
+                        .then(function () {
+                            left--;
+                            if (left == 0) {
+                                if (gone == names.length) { artInput.value = ''; pluginHandler.pkgmanager.pkgCreateDraftSync(); pluginHandler.pkgmanager.pkgAdminDraftSync(); }
+                                pluginHandler.pkgmanager.pkgAdminStatus(gone + '/' + names.length + ' artefatti eliminati dallo store' + ((gone == names.length) ? '' : ' — alcuni file non trovati'));
+                            }
+                        });
+                })(names[d]);
+            }
         } catch (e) { }
     };
 
@@ -750,7 +797,11 @@ module.exports.pkgmanager = function (parent) {
                     if ((d != null) && (d.cmd != null) && (d.cmd.trim() != '')) {
                         var def = { type: (parseInt(d.type) || pluginHandler.pkgmanager.pkgCreateDefaultType(k)), cmd: d.cmd.trim() };
                         var to = parseInt(d.to); if (to > 0) { def.timeout = to; }
-                        if ((d.art != null) && (d.art.trim() != '')) { def.artifact = d.art.trim(); }
+                        if ((d.art != null) && (d.art.trim() != '')) {
+                            // v1.3.0: a multi-name field builds a bundle list.
+                            var an = d.art.trim().split(/[\s,]+/).filter(function (x) { return x != ''; });
+                            if (an.length > 1) { def.artifacts = an; } else { def.artifact = an[0]; }
+                        }
                         if ((d.un != null) && (d.un.trim() != '')) { def.uninstall = d.un.trim(); }
                         pkg[k] = def;
                     }
@@ -932,6 +983,20 @@ module.exports.pkgmanager = function (parent) {
     obj.pkgCompose = function (pkg, def) {
         try {
             if (def == null) { return null; }
+            // v1.3.0 bundle: def.artifacts[] (server-enriched def.sha384s).
+            if ((def.artifacts != null) && (def.artifacts.length > 0)) {
+                if ((def.artifactMissing === true) || (window.pkgmanagerToken == null)) { return null; }
+                var cmd = String(def.cmd);
+                var base = location.origin + '/pkgstore.ashx?t=' + encodeURIComponent(window.pkgmanagerToken) + '&p=';
+                for (var i = 0; i < def.artifacts.length; i++) {
+                    var url2 = base + encodeURIComponent(pkg.id + '/' + def.artifacts[i]);
+                    var h2 = ((def.sha384s != null) ? def.sha384s[i + 1] : null);
+                    if (h2 == null) { return null; }
+                    cmd = cmd.split('{{url:' + (i + 1) + '}}').join(url2).split('{{sha384:' + (i + 1) + '}}').join(h2);
+                    if (i == 0) { cmd = cmd.split('{{url}}').join(url2).split('{{sha384}}').join(h2); }
+                }
+                return cmd;
+            }
             if (def.artifact != null) {
                 if ((def.artifactMissing === true) || (def.sha384 == null) || (window.pkgmanagerToken == null)) { return null; }
                 var url = location.origin + '/pkgstore.ashx?t=' + encodeURIComponent(window.pkgmanagerToken) + '&p=' + encodeURIComponent(pkg.id + '/' + def.artifact);
@@ -1240,19 +1305,29 @@ module.exports.pkgmanager = function (parent) {
     };
 
     // SHA-384 + size of a store artifact (cached by mtime); flags artifactMissing.
-    obj.pkgArtifactInfo = function (pkgid, def, callback) {
-        var key = pkgid + '/' + def.artifact;
-        var full = parent.path.join(obj.storePath, pkgid, def.artifact);
+    // v1.3.0: enrich ONE def file (name + 1-based index) with its SHA-384
+    // from the store. Bundles collect per-index hashes in def.sha384s; index
+    // 1 also back-fills the legacy def.sha384. Any missing file marks the
+    // whole def unusable (airgap safety: install is refused).
+    obj.pkgArtifactInfo = function (pkgid, name, idx, def, callback) {
+        var key = pkgid + '/' + name;
+        var full = parent.path.join(obj.storePath, pkgid, name);
         parent.fs.stat(full, function (err, st) {
-            if ((err != null) || (!st.isFile())) { def.artifactMissing = true; delete def.sha384; callback(); return; }
+            var miss = function () { def.artifactMissing = true; delete def.sha384; delete def.sha384s; callback(); return; };
+            if ((err != null) || (!st.isFile())) { miss(); return; }
             var c = obj.artifactCache[key];
-            if ((c != null) && (c.mtime == st.mtimeMs)) { def.sha384 = c.sha384; def.artifactSize = st.size; def.artifactMissing = false; callback(); return; }
+            var fill = function (h) {
+                if (def.sha384s == null) { def.sha384s = {}; }
+                def.sha384s[idx] = h;
+                if (idx == 1) { def.sha384 = h; def.artifactSize = st.size; }
+                def.artifactMissing = false; callback();
+            };
+            if ((c != null) && (c.mtime == st.mtimeMs)) { fill(c.sha384); return; }
             parent.fs.readFile(full, function (err2, data) {
-                if (err2 != null) { def.artifactMissing = true; delete def.sha384; callback(); return; }
+                if (err2 != null) { miss(); return; }
                 var h = crypto.createHash('sha384').update(data).digest('hex');
                 obj.artifactCache[key] = { sha384: h, mtime: st.mtimeMs };
-                def.sha384 = h; def.artifactSize = st.size; def.artifactMissing = false;
-                callback();
+                fill(h);
             });
         });
     };
@@ -1263,6 +1338,15 @@ module.exports.pkgmanager = function (parent) {
         var out = { type: ((def.type == 1) || (def.type == 2)) ? def.type : 3, cmd: def.cmd };
         var to = parseInt(def.timeout); if (to > 0) { out.timeout = to; }
         if ((typeof def.artifact == 'string') && (def.artifact.trim() != '') && (/^[a-zA-Z0-9._ -]+$/.test(def.artifact.trim()))) { out.artifact = def.artifact.trim(); }
+        // v1.3.0 OS-update bundle: ordered list of store files.
+        if (Array.isArray(def.artifacts)) {
+            var arts = [];
+            for (var i = 0; (i < def.artifacts.length) && (arts.length < 32); i++) {
+                var nm = String(def.artifacts[i]).trim();
+                if ((nm != '') && (/^[a-zA-Z0-9._-]+$/.test(nm))) { arts.push(nm); }
+            }
+            if (arts.length > 0) { out.artifacts = arts; }
+        }
         if ((typeof def.uninstall == 'string') && (def.uninstall.trim() != '')) { out.uninstall = def.uninstall.trim().slice(0, 4096); }
         return out;
     };
@@ -1286,13 +1370,19 @@ module.exports.pkgmanager = function (parent) {
                 var p = cat.packages[i];
                 for (var k = 0; k < oses.length; k++) {
                     var def = p[oses[k]];
-                    if ((def != null) && (def.artifact != null)) { work.push({ pkgid: p.id, def: def }); }
+                    if (def == null) { continue; }
+                    // v1.3.0: bundle (artifacts[]) or legacy single artifact.
+                    var names2 = null;
+                    if ((def.artifacts != null) && (def.artifacts.length > 0)) { names2 = def.artifacts; }
+                    else if (def.artifact != null) { names2 = [def.artifact]; }
+                    if (names2 == null) { continue; }
+                    for (var n2 = 0; n2 < names2.length; n2++) { work.push({ pkgid: p.id, def: def, name: names2[n2], idx: (n2 + 1) }); }
                 }
             }
             if (work.length == 0) { send(); return; }
             var done = 0;
             for (var w = 0; w < work.length; w++) {
-                (function (item) { obj.pkgArtifactInfo(item.pkgid, item.def, function () { done++; if (done == work.length) { send(); } }); })(work[w]);
+                (function (item) { obj.pkgArtifactInfo(item.pkgid, item.name, item.idx, item.def, function () { done++; if (done == work.length) { send(); } }); })(work[w]);
             }
         });
     };
