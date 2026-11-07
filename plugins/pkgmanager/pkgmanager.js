@@ -34,6 +34,17 @@
  *     BUILDER (v0.9.0) — ONE single form with an OS dropdown (like the
  *     other options): switching OS swaps artifact/type/timeout/command
  *     fields and a per-OS draft in memory never loses anything. Airgap
+ *     v1.8.0 EXPORTABLE PYTHON DOWNLOADER: «Esporta downloader…» (admin,
+ *     OS view) — the plugin GENERATES meshos-downloader.py with the scan
+ *     inventory ALREADY EMBEDDED and hands it out through MeshCentral
+ *     itself (LAN download): zero arguments, zero config, Python stdlib
+ *     only (urllib/gzip/hashlib; dpkg version compare when available).
+ *     THE flow for an AIRGAP server: run it on any machine with internet
+ *     -> copy os-updates/ into the store (My Files) -> «Importa manifest…».
+ *     «Scarica aggiornamenti» stays as the fast path for a server WITH
+ *     internet; its errors/skips are now VISIBLE client-side (pkgList
+ *     renders message.error — previously silent) and every message points
+ *     to «Esporta downloader…» for airgap servers.
  *     v1.7.0 OS-TAB REMOVAL + INTEGRATED DOWNLOADER: OS updates can NOT be
  *     hand-created — the «Creazione aggiornamenti» tab is GONE (the OS bar
  *     keeps Aggiornamenti OS · Gestione aggiornamenti), the package wizard
@@ -132,13 +143,13 @@ module.exports.pkgmanager = function (parent) {
     var zlib = require('zlib');
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var obj = {};
-    obj.version = '1.7.0';
+    obj.version = '1.8.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -1095,6 +1106,7 @@ module.exports.pkgmanager = function (parent) {
             window.pkgmanagerCatalog = message.catalog;
             window.pkgmanagerToken = message.token;
             if (message.opAck != null) { window.pkgmanagerAdminMsg = message.opAck; }
+            if (message.error != null) { window.pkgmanagerAdminMsg = message.error; pluginHandler.pkgmanager.pkgMsg(message.error); } // v1.8.0: gli errori del server (es. osfetch su server airgap) ora sono VISIBILI
             pluginHandler.pkgmanager.pkgTabSetActive(window.pkgmanagerView);
             var cat = window.pkgmanagerCatalog;
             var d = document.getElementById('pkgmanagerTab');
@@ -1215,7 +1227,7 @@ module.exports.pkgmanager = function (parent) {
             x += '<div id="pkgmanagerSelSummary" style="margin-bottom:8px;color:#888"></div>';
             x += '<div style="display:flex;gap:16px;align-items:flex-start">';
             x += '<div style="flex:1 1 60%;min-width:0"><div style="margin-bottom:4px"><b>Bundle di aggiornamento OS</b> <span id="pkgmanagerFilterNote" style="color:#888;font-weight:normal"></span> <span style="font-size:12px">[<a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(true);return false">tutti</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(false);return false">nessuno</a>]</span></div>';
-            x += '<div style="margin-bottom:6px"><input type=button value="Installa selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'install\')"> <input type=button value="Elimina selezionati" title="Esegue il comando di disinstallazione sui dispositivi selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'delete\')"> <input type=button value="Scansiona macchine" title="Raccoglie l inventario aggiornamenti da TUTTE le macchine online (Linux/Windows/macOS)" onclick="pluginHandler.pkgmanager.pkgOsScan()"> ' + (osfAdm ? '<input type=button value="Scarica aggiornamenti" title="Il SERVER scarica dai repository vendor i pacchetti mancanti emersi dalla scansione (delta+dipendenze), li mette nello store e crea da solo il bundle OS — le macchine restano airgap" onclick="pluginHandler.pkgmanager.pkgOsFetchUpdates()"> ' : '') + '<input type=button value="Esporta report (.json)" title="Fallback: report della scansione per meshos-fetch (server senza accesso internet)" onclick="pluginHandler.pkgmanager.pkgOsScanExport()"> <span id="pkgmanagerPkgSummary" style="color:#888;font-weight:normal"></span></div><div id="pkgmanagerTableWrap"></div></div>';
+            x += '<div style="margin-bottom:6px"><input type=button value="Installa selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'install\')"> <input type=button value="Elimina selezionati" title="Esegue il comando di disinstallazione sui dispositivi selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'delete\')"> <input type=button value="Scansiona macchine" title="Raccoglie l inventario aggiornamenti da TUTTE le macchine online (Linux/Windows/macOS)" onclick="pluginHandler.pkgmanager.pkgOsScan()"> ' + (osfAdm ? '<input type=button value="Scarica aggiornamenti" title="Il SERVER scarica dai repository vendor i pacchetti mancanti emersi dalla scansione (delta+dipendenze), li mette nello store e crea da solo il bundle OS — richiede che il SERVER abbia internet (le macchine restano airgap)" onclick="pluginHandler.pkgmanager.pkgOsFetchUpdates()"> ' : '') + (osfAdm ? '<input type=button value="Esporta downloader…" title="Genera e scarica meshos-downloader.py con l inventario della scansione gia incorporato: eseguilo con python3 su una macchina qualsiasi con internet, copia os-updates/ nello store del server (My Files) e importa il manifest — LA via per i server airgap" onclick="pluginHandler.pkgmanager.pkgOsExportDownloader()"> ' : '') + '<input type=button value="Esporta report (.json)" title="Fallback legacy: report della scansione per meshos-fetch (CLI Node)" onclick="pluginHandler.pkgmanager.pkgOsScanExport()"> <span id="pkgmanagerPkgSummary" style="color:#888;font-weight:normal"></span></div><div id="pkgmanagerTableWrap"></div></div>';
             x += '<div style="flex:0 0 320px;border-left:1px solid #ddd;padding-left:12px">';
             x += '<div style="margin-bottom:4px"><b>Macchine di destinazione</b> — <span style="font-size:12px"><a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(true);return false">tutte</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(false);return false">nessuna</a></span></div>';
             x += '<div id="pkgmanagerDeviceList" style="max-height:420px;overflow-y:auto">';
@@ -1350,7 +1362,7 @@ module.exports.pkgmanager = function (parent) {
                 x += '<tr><td style="padding:4px">' + EscapeHtml(m.name) + '</td><td style="padding:4px">' + EscapeHtml(m.os) + '</td><td style="padding:4px">' + EscapeHtml(ver) + '</td><td style="padding:4px">' + m.items.length + '</td><td style="padding:4px">' + (m.got ? '<span style="color:#080">inventario ✓</span>' : '<span style="color:#888">in attesa…</span>') + '</td></tr>';
             }
             x += '</table>';
-            if (run.done) { x += '<div style="color:#888;font-size:12px;margin-top:4px">Scansione completata — «Scarica aggiornamenti» scarica i mancanti direttamente sul server (le macchine restano airgap); «Esporta report (.json)» resta come fallback per meshos-fetch.</div>'; }
+            if (run.done) { x += '<div style="color:#888;font-size:12px;margin-top:4px">Scansione completata — «Scarica aggiornamenti» (server con internet) o «Esporta downloader…» (server airgap: downloader Python con inventario incorporato) creano il bundle; «Esporta report (.json)» resta fallback legacy per meshos-fetch.</div>'; }
             el.innerHTML = (any ? x : '');
         } catch (e) { console.log('pkgmanager os scan render failed: ' + e); }
     };
@@ -1365,7 +1377,7 @@ module.exports.pkgmanager = function (parent) {
                 var m = run.machs[nid];
                 machines.push({ id: nid, name: m.name, os: m.os, osInfo: { name: ((m.info != null) && (m.info.length > 0)) ? m.info[0] : '', version: ((m.info != null) && (m.info.length > 1)) ? m.info[1] : '', codename: ((m.info != null) && (m.info.length > 2)) ? m.info[2] : '' }, items: m.items.slice(0) });
             }
-            var report = { tool: 'pkgmanager', pluginVersion: '1.7.0', generated: new Date().toISOString(), machines: machines };
+            var report = { tool: 'pkgmanager', pluginVersion: '1.8.0', generated: new Date().toISOString(), machines: machines };
             var blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
             var a = document.createElement('a');
             var d = new Date();
@@ -1403,6 +1415,42 @@ module.exports.pkgmanager = function (parent) {
             meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'osfetch', pkgid: String(pid).trim(), name: String(nm).trim(), machines: machines });
             pluginHandler.pkgmanager.pkgMsg('Download server-side avviato: il server scarica i pacchetti mancanti (delta+dipendenze) dai repository vendor e crea il bundle da solo — attendi l esito qui.');
         } catch (e) { pluginHandler.pkgmanager.pkgMsg('Download fallito: ' + e); }
+    };
+
+    // v1.8.0: «Esporta downloader…» — asks the server to GENERATE the
+    // stand-alone PYTHON downloader with the completed scan inventory
+    // ALREADY EMBEDDED, then downloads it through MeshCentral itself (LAN).
+    // THE flow for an AIRGAP server: run it on any machine with internet
+    // (python3 meshos-downloader.py), copy os-updates/ into the store (My
+    // Files -> Pacchetti (pkgmanager)) and «Importa manifest…».
+    obj.pkgOsExportDownloader = function () {
+        try {
+            var run = window.pkgmanagerOsScan;
+            if ((run == null) || (!run.done)) { pluginHandler.pkgmanager.pkgMsg('Nessuna scansione completata: prima fai «Scansiona macchine».'); return; }
+            var machines = [];
+            for (var nid in run.machs) {
+                var m = run.machs[nid];
+                machines.push({ id: nid, name: m.name, os: m.os, osInfo: { name: ((m.info != null) && (m.info.length > 0)) ? m.info[0] : '', version: ((m.info != null) && (m.info.length > 1)) ? m.info[1] : '', codename: ((m.info != null) && (m.info.length > 2)) ? m.info[2] : '' }, items: m.items.slice(0) });
+            }
+            meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'exportdownloader', machines: machines });
+            pluginHandler.pkgmanager.pkgMsg('Generazione di meshos-downloader.py in corso (inventario incorporato)…');
+        } catch (e) { pluginHandler.pkgmanager.pkgMsg('Esportazione fallita: ' + e); }
+    };
+
+    // v1.8.0: server reply carrying the generated Python downloader: the
+    // browser saves it as a file (same download mechanics as the report).
+    obj.pkgDownloaderReady = function (server, message) {
+        try {
+            var script = String(((message != null) ? message.script : '') || '');
+            if (script == '') { pluginHandler.pkgmanager.pkgMsg('Il server non ha prodotto il downloader.'); return; }
+            var blob = new Blob([script], { type: 'text/x-python' });
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = String(((message != null) ? message.filename : '') || 'meshos-downloader.py');
+            document.body.appendChild(a); a.click();
+            setTimeout(function () { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) { } }, 2000);
+            pluginHandler.pkgmanager.pkgMsg('Downloader esportato: ' + a.download + ' (' + Math.round(script.length / 1024) + 'KB, inventario incorporato) — eseguilo con python3 su una macchina con internet, copia os-updates/ nello store (My Files) e «Importa manifest…».');
+        } catch (e) { pluginHandler.pkgmanager.pkgMsg('Esportazione fallita: ' + e); }
     };
 
     obj.pkgOsTable = function () {
@@ -1817,6 +1865,251 @@ module.exports.pkgmanager = function (parent) {
         });
     };
 
+    // v1.8.0: builds the stand-alone PYTHON downloader with the scan
+    // inventory EMBEDDED. Stdlib only. The generated source contains ZERO
+    // backslash characters on purpose (splitlines() instead of split('\n')):
+    // no escaping headaches in any direction, easy to audit.
+    obj.buildPyDownloader = function (machines) {
+        var inv = [];
+        for (var i = 0; i < machines.length; i++) {
+            var m = machines[i];
+            var info = ((m != null) && (m.osInfo != null)) ? m.osInfo : {};
+            var items = [];
+            if (Array.isArray(m.items)) { for (var j = 0; j < m.items.length; j++) { items.push(String(m.items[j])); } }
+            inv.push({ id: String((m != null) ? (m.id || m.name || '') : ''), name: String((m != null) ? (m.name || '') : ''), os: String((m != null) ? (m.os || '') : ''), osInfo: { name: String(info.name || ''), version: String(info.version || ''), codename: String(info.codename || '') }, items: items });
+        }
+        var pre = `#!/usr/bin/env python3
+# meshos-downloader — airgap OS-update downloader generated by the
+# MeshCentral pkgmanager plugin (v1.8.0).
+#
+# The scan inventory is ALREADY INSIDE this file (INVENTORY below): no
+# arguments, no config needed. Run it on ANY machine with internet:
+#
+#     python3 meshos-downloader.py             # all missing updates
+#     python3 meshos-downloader.py --max 3     # cap for a test run
+#
+# It downloads ONLY the missing Ubuntu/Debian packages (delta vs the vendor
+# security+updates indexes + the dependency closure) into os-updates/ and
+# writes os-updates/manifest.json with the sha384 of every file.
+#
+# Then: copy EVERYTHING from os-updates/ into the MeshCentral server store
+# (web UI -> My Files -> "Pacchetti (pkgmanager)" -> store/<bundle-id>/)
+# and in the plugin: Aggiornamenti OS -> Gestione aggiornamenti ->
+# «Importa manifest…» with that same bundle id. The server verifies every
+# file and builds the OS bundle by itself.
+#
+# Ubuntu/Debian is the solid path; Windows/macOS machines in the inventory
+# are reported as skipped (best effort: missing KBs / combo updates are
+# not deducible from an installed-packages scan — use meshos-fetch or WSUS).
+import datetime
+import gzip
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import urllib.request
+`;
+        var post = `OUT_DIR = 'os-updates'
+MAX_FILES = None
+UA = 'MeshCentral-pkgmanager/1.8.0 (meshos-downloader)'
+
+for _i in range(1, len(sys.argv)):
+    if (sys.argv[_i] == '--max') and (_i + 1 < len(sys.argv)):
+        try:
+            MAX_FILES = int(sys.argv[_i + 1])
+        except ValueError:
+            print('avviso: --max non numerico, ignorato')
+        break
+
+def log(msg):
+    print('[meshos-downloader] ' + str(msg))
+
+def http_get(url):
+    req = urllib.request.Request(url, headers={'User-Agent': UA})
+    return urllib.request.urlopen(req, timeout=90).read()
+
+def sha384_of(buf):
+    return hashlib.sha384(buf).hexdigest()
+
+HAS_DPKG = shutil.which('dpkg') is not None
+
+def ver_ge(a, b):
+    if a == b:
+        return True
+    if HAS_DPKG:
+        return subprocess.call(['dpkg', '--compare-versions', str(a), 'ge', str(b)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
+    return str(a) >= str(b)
+
+def parse_index(text):
+    idx = {}
+    cur = {}
+    def flush():
+        if ('Package' in cur) and ('Version' in cur) and ('Filename' in cur) and (cur.get('Architecture') in ('amd64', 'all')):
+            idx.setdefault(cur['Package'], []).append(cur)
+    for line in text.splitlines():
+        if line.strip() == '':
+            flush()
+            cur = {}
+            continue
+        pos = line.find(':')
+        if pos > 0:
+            key = line[:pos].strip()
+            val = line[pos + 1:].strip()
+            if key not in cur:
+                cur[key] = val
+    flush()
+    return idx
+
+def best(stanzas):
+    out = stanzas[0]
+    for st in stanzas:
+        if ver_ge(st['Version'], out['Version']):
+            out = st
+    return out
+
+def dep_groups(st):
+    out = []
+    for grp in str(st or '').split(','):
+        grp = grp.strip()
+        if grp == '':
+            continue
+        names = []
+        for alt in grp.split('|'):
+            nm = alt.split('(')[0].strip()
+            if nm != '':
+                names.append(nm)
+        if names:
+            out.append(names)
+    return out
+
+manifest = {'tool': 'pkgmanager-export', 'version': '1.8', 'generated': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'files': [], 'skipped': []}
+skipped = manifest['skipped']
+
+def fetch_index(codename):
+    pockets = ['https://security.ubuntu.com/ubuntu/dists/' + codename + '-security', 'https://archive.ubuntu.com/ubuntu/dists/' + codename + '-updates']
+    areas = ['main', 'universe']
+    idx = {}
+    for pocket in pockets:
+        for area in areas:
+            url = pocket + '/' + area + '/binary-amd64/Packages.gz'
+            text = None
+            for cand in (url, url.replace('https://', 'http://')):
+                try:
+                    text = gzip.decompress(http_get(cand)).decode('utf-8', 'replace')
+                    break
+                except Exception:
+                    pass
+            if text is None:
+                skipped.append({'machine': '(indice)', 'reason': 'indice vendor non raggiungibile: ' + url})
+                continue
+            for name, stanzas in parse_index(text).items():
+                if name not in idx:
+                    idx[name] = []
+                idx[name].extend(stanzas)
+    return idx
+
+os.makedirs(OUT_DIR, exist_ok=True)
+done = {}
+targets_by = {}
+
+for m in INVENTORY:
+    os_name = str(m.get('os') or '').lower()
+    if os_name in ('windows', 'macos', 'darwin'):
+        skipped.append({'machine': str(m.get('name')), 'reason': os_name + ': best effort — KB/combo non deducibili dalla sola scansione (meshos-fetch --kb/--macos o WSUS)'})
+        continue
+    codename = str((m.get('osInfo') or {}).get('codename') or '').strip()
+    if codename == '':
+        skipped.append({'machine': str(m.get('name')), 'reason': 'codename assente nell inventario (scansione vecchia?)'})
+        continue
+    installed = {}
+    for item in (m.get('items') or []):
+        s = str(item)
+        pos = s.find(' ')
+        if pos > 0:
+            installed[s[:pos]] = s[pos + 1:].strip()
+    log('linux ' + str(m.get('name')) + ': ' + str(len(installed)) + ' pacchetti installati (Ubuntu ' + codename + ')')
+    idx = fetch_index(codename)
+    queue = []
+    queued = {}
+    def push(name, reason):
+        stanzas = idx.get(name)
+        if not stanzas:
+            return
+        cand = best(stanzas)
+        key = name + '_' + cand['Version']
+        if key in queued:
+            return
+        queued[key] = 1
+        queue.append({'name': name, 'reason': reason, 'st': cand})
+    for iname in installed:
+        stanzas = idx.get(iname)
+        if not stanzas:
+            continue
+        cand = best(stanzas)
+        if not ver_ge(installed[iname], cand['Version']):
+            push(iname, 'aggiornamento disponibile')
+    seen = dict(queued)
+    frontier = list(queue)
+    while frontier:
+        nxt = []
+        for qi in frontier:
+            for names in dep_groups((qi['st'].get('Depends') or '') + ',' + (qi['st'].get('Pre-Depends') or '')):
+                pick = None
+                for nm in names:
+                    if nm in idx:
+                        pick = nm
+                        break
+                if (pick is None) or (pick in installed) or (pick in seen):
+                    continue
+                seen[pick] = 1
+                stz = best(idx[pick])
+                key = pick + '_' + stz['Version']
+                if key in queued:
+                    continue
+                queued[key] = 1
+                item = {'name': pick, 'reason': 'dipendenza di ' + qi['name'], 'st': stz}
+                queue.append(item)
+                nxt.append(item)
+        frontier = nxt
+    log('  delta+dipendenze: ' + str(len(queue)) + ' pacchetti')
+    for qi in queue:
+        key = qi['name'] + '_' + qi['st']['Version']
+        if key not in done:
+            done[key] = {'package': qi['name'], 'version': qi['st']['Version'], 'file': qi['name'] + '_' + qi['st']['Version'] + '_' + str(qi['st'].get('Architecture') or 'amd64') + '.deb', 'orig': 'http://archive.ubuntu.com/ubuntu/' + qi['st']['Filename'], 'alt': 'http://security.ubuntu.com/ubuntu/' + qi['st']['Filename'], 'size': int(qi['st'].get('Size') or 0)}
+        targets_by.setdefault(key, []).append(str(m.get('id') or m.get('name') or ''))
+
+order = sorted(done.values(), key=lambda e: e['size'])
+log('download unificato: ' + str(len(order)) + ' file distinti' + (' (cap --max ' + str(MAX_FILES) + ')' if MAX_FILES is not None else ''))
+for e in order:
+    if (MAX_FILES is not None) and (len(manifest['files']) >= MAX_FILES):
+        skipped.append({'file': e['file'], 'reason': 'cap --max raggiunto (per il resto rilancialo senza --max)'})
+        continue
+    buf = None
+    for cand in (e['orig'], e['alt']):
+        try:
+            buf = http_get(cand)
+            break
+        except Exception:
+            pass
+    if buf is None:
+        skipped.append({'file': e['file'], 'reason': 'download fallito (' + e['orig'] + ')'})
+        continue
+    with open(os.path.join(OUT_DIR, e['file']), 'wb') as fh:
+        fh.write(buf)
+    key = e['package'] + '_' + e['version']
+    manifest['files'].append({'os': 'linux', 'package': e['package'], 'version': e['version'], 'file': e['file'], 'sha384': sha384_of(buf), 'size': len(buf), 'targets': targets_by.get(key, [])})
+    log('  ok ' + e['file'] + ' (' + str(len(buf) // 1024) + 'KB)')
+
+with open(os.path.join(OUT_DIR, 'manifest.json'), 'w') as fh:
+    json.dump(manifest, fh, indent=2)
+log('fatto: ' + str(len(manifest['files'])) + ' file scaricati, ' + str(len(manifest['skipped'])) + ' saltati -> ' + OUT_DIR)
+log('prossimo passo: copia ' + OUT_DIR + '/ nello store del server (My Files -> Pacchetti (pkgmanager) -> store/<id-bundle>/) e «Importa manifest…» nel plugin.')
+`;
+        return pre + 'INVENTORY = ' + JSON.stringify(inv) + '\n\n' + post;
+    };
+
     obj.serveraction = function (command, session, parent2) {
         console.log('pkgmanager[server]: serveraction ' + command.pluginaction + ' from user ' + command.userid);
         var isAdmin = ((session != null) && (session.user != null) && (session.user.siteadmin === 0xFFFFFFFF));
@@ -1935,16 +2228,34 @@ module.exports.pkgmanager = function (parent) {
                     }
                     if (files.length === 0) {
                         var reasons = fskipped.slice(0, 3).map(function (s) { return String((s.machine || s.file || '?') + ': ' + s.reason); }).join(' | ');
-                        obj.replyCatalog(session, null, 'Nessun aggiornamento scaricato' + ((fskipped.length > 0) ? (' — ' + fskipped.length + ' saltati: ' + reasons) : ' (macchine gia aggiornate?)'));
+                        obj.replyCatalog(session, null, 'Nessun aggiornamento scaricato' + ((fskipped.length > 0) ? (' — ' + fskipped.length + ' saltati: ' + reasons) : ' (macchine gia aggiornate?)') + ' — se il server e airgap usa «Esporta downloader…» nella vista Aggiornamenti OS ed eseguilo su una macchina con internet.');
                         return;
                     }
                     console.log('pkgmanager[server]: osfetch -> import ' + fid + ' (' + files.length + ' file, ' + fskipped.length + ' saltati)');
                     obj.serveraction({ pluginaction: 'importmanifest', userid: command.userid, pkgid: fid, name: String(command.name || fid), manifest: { tool: 'pkgmanager-osfetch', version: '1.7', generated: new Date().toISOString(), files: files, skipped: fskipped } }, session, parent2);
                 } catch (err) {
                     console.log('pkgmanager[server]: osfetch error: ' + err);
-                    try { obj.replyCatalog(session, null, 'Download aggiornamenti fallito: ' + err); } catch (e3) { }
+                    try { obj.replyCatalog(session, null, 'Download aggiornamenti fallito: ' + err + ' — se il server e airgap usa «Esporta downloader…» nella vista Aggiornamenti OS.'); } catch (e3) { }
                 }
             })();
+            return;
+        }
+
+        // v1.8.0: «Esporta downloader…» — GENERATES the stand-alone PYTHON
+        // downloader (meshos-downloader.py) with the scan inventory ALREADY
+        // EMBEDDED and hands it to the admin through MeshCentral itself (LAN
+        // download, admin-only). For an AIRGAP server this is THE way to
+        // fetch OS updates: run the script on any machine with internet,
+        // copy os-updates/ into the store (My Files), «Importa manifest…».
+        if (command.pluginaction == 'exportdownloader') {
+            if (!isAdmin) { console.log('pkgmanager[server]: denied exportdownloader for user ' + command.userid + ' (not full site admin)'); deny(); return; }
+            var xmachs = command.machines;
+            if ((xmachs == null) || (Array.isArray(xmachs) !== true) || (xmachs.length === 0)) { obj.replyCatalog(session, null, 'Nessuna macchina nella scansione: prima fai «Scansiona macchine» dalla vista Aggiornamenti OS.'); return; }
+            try {
+                var xscript = obj.buildPyDownloader(xmachs);
+                console.log('pkgmanager[server]: exportdownloader -> meshos-downloader.py (' + Math.round(xscript.length / 1024) + 'KB, ' + xmachs.length + ' macchina/e incorporate)');
+                session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgDownloaderReady', filename: 'meshos-downloader.py', script: xscript });
+            } catch (e) { obj.replyCatalog(session, null, 'Generazione downloader fallita: ' + e); }
             return;
         }
 
@@ -1974,9 +2285,9 @@ module.exports.pkgmanager = function (parent) {
                 byOs[os2].push(fe);
             }
             if (missing.length > 0) { obj.replyCatalog(session, null, 'File mancanti nello store — copiali in plugins/pkgmanager/store/' + pkgid + '/: ' + missing.join(', ')); return; }
-            var isOsf = (String((man != null) ? (man.tool || '') : '') == 'pkgmanager-osfetch');
+            var isOsf = ((String((man != null) ? (man.tool || '') : '') == 'pkgmanager-osfetch') || (String((man != null) ? (man.tool || '') : '') == 'pkgmanager-export'));
             var skipN = (Array.isArray(man.skipped) ? man.skipped.length : 0);
-            var descOsf = 'Aggiornamenti OS scaricati dal server: ' + man.files.length + ' file (delta+dipendenze dalla scansione' + ((skipN > 0) ? (', ' + skipN + ' saltati: ' + String(man.skipped.slice(0, 2).map(function (s) { return String((s.machine || s.file || '?') + ' — ' + s.reason); }).join(' | ')).slice(0, 220)) : '') + ') — installazione airgap dalla LAN';
+            var descOsf = 'Aggiornamenti OS (downloader pkgmanager): ' + man.files.length + ' file (delta+dipendenze dalla scansione' + ((skipN > 0) ? (', ' + skipN + ' saltati: ' + String(man.skipped.slice(0, 2).map(function (s) { return String((s.machine || s.file || '?') + ' — ' + s.reason); }).join(' | ')).slice(0, 220)) : '') + ') — installazione airgap dalla LAN';
             var pkgB = { id: pkgid, name: String(command.name || pkgid), description: (isOsf ? descOsf : ('Bundle OS importato da meshos-fetch (' + String((man.generated != null) ? man.generated : '') + ') — airgap')), kind: 'os' };
             for (var osk in byOs) {
                 var fl = byOs[osk];
