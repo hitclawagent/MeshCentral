@@ -1,5 +1,5 @@
 /**
- * MeshCentral Package Manager plugin ("pkgmanager") — v1.4.0.
+ * MeshCentral Package Manager plugin ("pkgmanager") — v1.4.1.
  *
  * Design: the catalog lives server-side (catalog.json next to this file).
  * The plugin pages are TABS IN THE TOP GRAY BAR (their own
@@ -90,7 +90,7 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '1.4.0';
+    obj.version = '1.4.1';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -175,7 +175,7 @@ module.exports.pkgmanager = function (parent) {
             // The tab row is the plugin TOP MENU: visible right away (v0.7.1),
             // not only after a plugin page is opened.
             pluginHandler.pkgmanager.pkgTabSetActive(null, false);
-            console.log('pkgmanager: sidebar entry + top bar tabs injected (row always visible)');
+            console.log('pkgmanager: sidebar entry + top bar tabs injected (gray bar only on plugin pages)');
         } catch (e) { console.log('pkgmanager sidebar inject failed: ' + e); }
     };
 
@@ -197,10 +197,11 @@ module.exports.pkgmanager = function (parent) {
             var adm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
             if (t2 != null) { t2.style.display = adm ? '' : 'none'; }
             if (t3 != null) { t3.style.display = adm ? '' : 'none'; }
-            // The row is the plugin TOP MENU: always visible, except while a
-            // device sub-view owns the gray bar (goPageStart passes hideRow
-            // for x 9..19 — the same bar renders General/Desktop/... there).
-            span.style.display = (hideRow === true) ? 'none' : '';
+            // v1.4.1 fix (user report): the gray bar with the plugin tabs must
+            // appear ONLY while a plugin page is open (a sidebar icon was
+            // selected) and hide on every core page, like the core's own tab
+            // rows. goPageStart passes which=null when leaving the plugin.
+            span.style.display = ((which != null) && (hideRow !== true)) ? '' : 'none';
             var ts = [t1, t2, t3, t4];
             for (var i = 0; i < ts.length; i++) { if (ts[i] != null) { ts[i].classList.remove('fullselect'); } }
             if (which != null) {
