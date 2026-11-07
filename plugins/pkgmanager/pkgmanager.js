@@ -34,6 +34,16 @@
  *     BUILDER (v0.9.0) — ONE single form with an OS dropdown (like the
  *     other options): switching OS swaps artifact/type/timeout/command
  *     fields and a per-OS draft in memory never loses anything. Airgap
+ *     v1.9.1 STICKY VIEW: when the control websocket drops (network blip,
+ *     laptop sleep, server restart) the CORE bounces to the disconnection
+ *     panel (go(0)) and silently re-lands on the main page (go(1)) after
+ *     the reconnect — killing any open plugin view. goPageStart now SAVES
+ *     the active plugin view into sessionStorage on every go(0) (the one
+ *     go() a user can never fire by hand) and pkgList REOPENS it by itself
+ *     once the catalog arrives after the bounce (only when the core landed
+ *     on page 1 and no plugin view is active; the marker is consumed on
+ *     read). A user-initiated navigation away (any other go(x)) never arms
+ *     the marker — the sticky restore only ever follows a real disconnect.
  *     v1.9.0 COMPILED PER-PLATFORM DOWNLOADER: like the meshagents, the
  *     downloader ships COMPILED, one binary per OS — plugins/pkgmanager/
  *     bin/meshos-downloader-<platform> (win-x64, win-x86, linux-x64,
@@ -155,7 +165,7 @@ module.exports.pkgmanager = function (parent) {
     var zlib = require('zlib');
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.0';
+    obj.version = '1.9.1';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -301,6 +311,16 @@ module.exports.pkgmanager = function (parent) {
     obj.goPageStart = function (x, event) {
         try {
             if ((typeof xxdialogMode !== 'undefined') && xxdialogMode) return; // core would no-op this go()
+            // v1.9.1 sticky view: x == 0 e' il PANNELLO DI DISCONNESSIONE —
+            // il core rimbalza li' a ogni caduta della websocket di controllo
+            // e riatterra in silenzio su go(1) dopo la riconnessione,
+            // uccidendo la vista plugin aperta. Salvala ORA (un utente non
+            // puo' mai sparare go(0) a mano) cosi' pkgList la riapre quando
+            // il catalogo torna dopo il bounce.
+            if ((x === 0) && (window.pkgmanagerView != null)) {
+                try { sessionStorage.setItem('pkgmanagerStickyView', String(window.pkgmanagerView)); } catch (e2) { }
+                console.log('pkgmanager: sticky view armata per il bounce: ' + String(window.pkgmanagerView));
+            }
             window.pkgmanagerView = null;
             pluginHandler.pkgmanager.pkgTabSetActive(null, ((typeof x == 'number') && (x >= 9) && (x < 20)));
             var w = document.getElementById('pkgmanagerMainWrap');
@@ -1119,6 +1139,23 @@ module.exports.pkgmanager = function (parent) {
             window.pkgmanagerToken = message.token;
             if (message.opAck != null) { window.pkgmanagerAdminMsg = message.opAck; }
             if (message.error != null) { window.pkgmanagerAdminMsg = message.error; pluginHandler.pkgmanager.pkgMsg(message.error); } // v1.8.0: gli errori del server (es. osfetch su server airgap) ora sono VISIBILI
+            // v1.9.1 sticky view: dopo un bounce (go(0) ha salvato la vista)
+            // il core si e' riconnesso ed e' atterrato sulla pagina 1 —
+            // riapri la vista plugin DA SOLA. Solo se nessuna vista plugin e'
+            // attiva (il bounce l'ha smontata) e il core e' davvero atterrato
+            // sulla pagina principale; il marker viene consumato comunque.
+            var stickyV = null;
+            try { stickyV = sessionStorage.getItem('pkgmanagerStickyView'); sessionStorage.removeItem('pkgmanagerStickyView'); } catch (e2) { }
+            if ((stickyV != null) && (window.pkgmanagerView == null) && (typeof xxcurrentView !== 'undefined') && (xxcurrentView === 1)) {
+                try {
+                    if (stickyV === 'install') { pluginHandler.pkgmanager.pkgSidebarOpen(); }
+                    else if (stickyV === 'os') { pluginHandler.pkgmanager.pkgOsSidebarOpen(); }
+                    else if (stickyV === 'admin') { pluginHandler.pkgmanager.pkgAdminOpen(); }
+                    else if (stickyV === 'osadmin') { pluginHandler.pkgmanager.pkgOsAdminOpen(); }
+                    else if (stickyV === 'create') { pluginHandler.pkgmanager.pkgCreateOpen(); }
+                    console.log('pkgmanager: sticky view ripristinata dopo il bounce: ' + stickyV);
+                } catch (e3) { }
+            }
             pluginHandler.pkgmanager.pkgTabSetActive(window.pkgmanagerView);
             var cat = window.pkgmanagerCatalog;
             var d = document.getElementById('pkgmanagerTab');
