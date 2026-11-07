@@ -34,6 +34,18 @@
  *     BUILDER (v0.9.0) — ONE single form with an OS dropdown (like the
  *     other options): switching OS swaps artifact/type/timeout/command
  *     fields and a per-OS draft in memory never loses anything. Airgap
+ *     v1.9.0 COMPILED PER-PLATFORM DOWNLOADER: like the meshagents, the
+ *     downloader ships COMPILED, one binary per OS — plugins/pkgmanager/
+ *     bin/meshos-downloader-<platform> (win-x64, win-x86, linux-x64,
+ *     linux-arm64, linux-arm, macos-x64, macos-arm64; Go source in
+ *     tools/meshos-downloader/, stdlib only). «Esporta downloader…» asks the
+ *     platform (auto-detected from the admin browser), the SERVER patches the
+ *     scan inventory into the binary's embedded slot (byte-for-byte, like the
+ *     meshagent .msh patch: __MESHOS_INVENTORY_START__ + 2MB + __END__) and
+ *     serves it over /pkgstore.ashx (LAN download, admin-only). Run it on ANY
+ *     machine with internet (zero args; --max N to cap), copy os-updates/ into
+ *     the store (My Files), «Importa manifest…». 'py' in the platform prompt
+ *     keeps the v1.8.0 stand-alone Python script as the fallback.
  *     v1.8.0 EXPORTABLE PYTHON DOWNLOADER: «Esporta downloader…» (admin,
  *     OS view) — the plugin GENERATES meshos-downloader.py with the scan
  *     inventory ALREADY EMBEDDED and hands it out through MeshCentral
@@ -143,7 +155,7 @@ module.exports.pkgmanager = function (parent) {
     var zlib = require('zlib');
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var obj = {};
-    obj.version = '1.8.0';
+    obj.version = '1.9.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -1227,7 +1239,7 @@ module.exports.pkgmanager = function (parent) {
             x += '<div id="pkgmanagerSelSummary" style="margin-bottom:8px;color:#888"></div>';
             x += '<div style="display:flex;gap:16px;align-items:flex-start">';
             x += '<div style="flex:1 1 60%;min-width:0"><div style="margin-bottom:4px"><b>Bundle di aggiornamento OS</b> <span id="pkgmanagerFilterNote" style="color:#888;font-weight:normal"></span> <span style="font-size:12px">[<a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(true);return false">tutti</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(false);return false">nessuno</a>]</span></div>';
-            x += '<div style="margin-bottom:6px"><input type=button value="Installa selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'install\')"> <input type=button value="Elimina selezionati" title="Esegue il comando di disinstallazione sui dispositivi selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'delete\')"> <input type=button value="Scansiona macchine" title="Raccoglie l inventario aggiornamenti da TUTTE le macchine online (Linux/Windows/macOS)" onclick="pluginHandler.pkgmanager.pkgOsScan()"> ' + (osfAdm ? '<input type=button value="Scarica aggiornamenti" title="Il SERVER scarica dai repository vendor i pacchetti mancanti emersi dalla scansione (delta+dipendenze), li mette nello store e crea da solo il bundle OS — richiede che il SERVER abbia internet (le macchine restano airgap)" onclick="pluginHandler.pkgmanager.pkgOsFetchUpdates()"> ' : '') + (osfAdm ? '<input type=button value="Esporta downloader…" title="Genera e scarica meshos-downloader.py con l inventario della scansione gia incorporato: eseguilo con python3 su una macchina qualsiasi con internet, copia os-updates/ nello store del server (My Files) e importa il manifest — LA via per i server airgap" onclick="pluginHandler.pkgmanager.pkgOsExportDownloader()"> ' : '') + '<input type=button value="Esporta report (.json)" title="Fallback legacy: report della scansione per meshos-fetch (CLI Node)" onclick="pluginHandler.pkgmanager.pkgOsScanExport()"> <span id="pkgmanagerPkgSummary" style="color:#888;font-weight:normal"></span></div><div id="pkgmanagerTableWrap"></div></div>';
+            x += '<div style="margin-bottom:6px"><input type=button value="Installa selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'install\')"> <input type=button value="Elimina selezionati" title="Esegue il comando di disinstallazione sui dispositivi selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'delete\')"> <input type=button value="Scansiona macchine" title="Raccoglie l inventario aggiornamenti da TUTTE le macchine online (Linux/Windows/macOS)" onclick="pluginHandler.pkgmanager.pkgOsScan()"> ' + (osfAdm ? '<input type=button value="Scarica aggiornamenti" title="Il SERVER scarica dai repository vendor i pacchetti mancanti emersi dalla scansione (delta+dipendenze), li mette nello store e crea da solo il bundle OS — richiede che il SERVER abbia internet (le macchine restano airgap)" onclick="pluginHandler.pkgmanager.pkgOsFetchUpdates()"> ' : '') + (osfAdm ? '<input type=button value="Esporta downloader…" title="Genera e scarica il downloader COMPILATO per la piattaforma scelta (win-x64/x86, linux-x64/arm64/arm, macos-x64/arm64) con l inventario della scansione gia incorporato: eseguilo su una macchina qualsiasi con internet, copia os-updates/ nello store (My Files) e importa il manifest — LA via per i server airgap (py = script Python)" onclick="pluginHandler.pkgmanager.pkgOsExportDownloader()"> ' : '') + '<input type=button value="Esporta report (.json)" title="Fallback legacy: report della scansione per meshos-fetch (CLI Node)" onclick="pluginHandler.pkgmanager.pkgOsScanExport()"> <span id="pkgmanagerPkgSummary" style="color:#888;font-weight:normal"></span></div><div id="pkgmanagerTableWrap"></div></div>';
             x += '<div style="flex:0 0 320px;border-left:1px solid #ddd;padding-left:12px">';
             x += '<div style="margin-bottom:4px"><b>Macchine di destinazione</b> — <span style="font-size:12px"><a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(true);return false">tutte</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(false);return false">nessuna</a></span></div>';
             x += '<div id="pkgmanagerDeviceList" style="max-height:420px;overflow-y:auto">';
@@ -1362,7 +1374,7 @@ module.exports.pkgmanager = function (parent) {
                 x += '<tr><td style="padding:4px">' + EscapeHtml(m.name) + '</td><td style="padding:4px">' + EscapeHtml(m.os) + '</td><td style="padding:4px">' + EscapeHtml(ver) + '</td><td style="padding:4px">' + m.items.length + '</td><td style="padding:4px">' + (m.got ? '<span style="color:#080">inventario ✓</span>' : '<span style="color:#888">in attesa…</span>') + '</td></tr>';
             }
             x += '</table>';
-            if (run.done) { x += '<div style="color:#888;font-size:12px;margin-top:4px">Scansione completata — «Scarica aggiornamenti» (server con internet) o «Esporta downloader…» (server airgap: downloader Python con inventario incorporato) creano il bundle; «Esporta report (.json)» resta fallback legacy per meshos-fetch.</div>'; }
+            if (run.done) { x += '<div style="color:#888;font-size:12px;margin-top:4px">Scansione completata — «Scarica aggiornamenti» (server con internet) o «Esporta downloader…» (server airgap: downloader COMPILATO per-OS con inventario incorporato) creano il bundle; «Esporta report (.json)» resta fallback legacy per meshos-fetch.</div>'; }
             el.innerHTML = (any ? x : '');
         } catch (e) { console.log('pkgmanager os scan render failed: ' + e); }
     };
@@ -1417,39 +1429,69 @@ module.exports.pkgmanager = function (parent) {
         } catch (e) { pluginHandler.pkgmanager.pkgMsg('Download fallito: ' + e); }
     };
 
-    // v1.8.0: «Esporta downloader…» — asks the server to GENERATE the
-    // stand-alone PYTHON downloader with the completed scan inventory
-    // ALREADY EMBEDDED, then downloads it through MeshCentral itself (LAN).
-    // THE flow for an AIRGAP server: run it on any machine with internet
-    // (python3 meshos-downloader.py), copy os-updates/ into the store (My
-    // Files -> Pacchetti (pkgmanager)) and «Importa manifest…».
+    // v1.9.0: «Esporta downloader…» — COMPILED, one binary per OS (like the
+    // meshagents). Asks the platform (auto-detected from the admin browser),
+    // the SERVER patches the scan inventory into the binary's embedded slot
+    // and serves it over /pkgstore.ashx (LAN). THE flow for an AIRGAP server:
+    // run it on any machine with internet, copy os-updates/ into the store
+    // (My Files -> Pacchetti (pkgmanager)) and «Importa manifest…».
+    // 'py' keeps the v1.8.0 stand-alone Python script as the fallback.
     obj.pkgOsExportDownloader = function () {
         try {
             var run = window.pkgmanagerOsScan;
             if ((run == null) || (!run.done)) { pluginHandler.pkgmanager.pkgMsg('Nessuna scansione completata: prima fai «Scansiona macchine».'); return; }
+            var guess = 'linux-x64';
+            try {
+                var np = (String(navigator.platform || '') + ' ' + String(navigator.userAgent || '')).toLowerCase();
+                if (np.indexOf('win') >= 0) { guess = 'win-x64'; }
+                else if (np.indexOf('mac') >= 0) { guess = ((np.indexOf('arm64') >= 0) ? 'macos-arm64' : 'macos-x64'); }
+            } catch (e2) { }
+            var xplat = prompt('Piattaforma del downloader COMPILATO (il sistema della macchina con internet che lo eseguira\'):\nwin-x64 · win-x86 · linux-x64 · linux-arm64 · linux-arm · macos-x64 · macos-arm64\noppure "py" per lo script Python standalone:', guess);
+            if ((xplat == null) || (String(xplat).trim() == '')) { pluginHandler.pkgmanager.pkgMsg('Esportazione annullata.'); return; }
             var machines = [];
             for (var nid in run.machs) {
                 var m = run.machs[nid];
                 machines.push({ id: nid, name: m.name, os: m.os, osInfo: { name: ((m.info != null) && (m.info.length > 0)) ? m.info[0] : '', version: ((m.info != null) && (m.info.length > 1)) ? m.info[1] : '', codename: ((m.info != null) && (m.info.length > 2)) ? m.info[2] : '' }, items: m.items.slice(0) });
             }
-            meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'exportdownloader', machines: machines });
-            pluginHandler.pkgmanager.pkgMsg('Generazione di meshos-downloader.py in corso (inventario incorporato)…');
+            meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'exportdownloader', platform: String(xplat).trim(), machines: machines });
+            pluginHandler.pkgmanager.pkgMsg('Generazione del downloader ' + String(xplat).trim() + ' in corso (inventario incorporato)…');
         } catch (e) { pluginHandler.pkgmanager.pkgMsg('Esportazione fallita: ' + e); }
     };
 
-    // v1.8.0: server reply carrying the generated Python downloader: the
-    // browser saves it as a file (same download mechanics as the report).
+    // v1.9.0: server reply carrying the export. Binary path: the patched
+    // per-platform binary sits in store/_downloader/ (inventory embedded,
+    // patched byte-for-byte server-side) — fetched over /pkgstore.ashx (LAN)
+    // and saved. Python path (platform 'py'): the script text arrives in the
+    // message and is saved directly.
     obj.pkgDownloaderReady = function (server, message) {
         try {
-            var script = String(((message != null) ? message.script : '') || '');
+            var m = (message != null) ? message : {};
+            if (m.platform != null) {
+                var fn = String(m.file || ('meshos-downloader-' + m.platform));
+                var url = location.origin + '/pkgstore.ashx?t=' + encodeURIComponent(window.pkgmanagerToken) + '&p=' + encodeURIComponent('_downloader/' + fn);
+                fetch(url).then(function (r) {
+                    if (!r.ok) { throw new Error('HTTP ' + r.status); }
+                    return r.blob();
+                }).then(function (blob) {
+                    var a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = fn;
+                    document.body.appendChild(a); a.click();
+                    setTimeout(function () { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e3) { } }, 2000);
+                    var runCmd = ((String(m.platform).indexOf('win') === 0) ? (fn + ' --max 3') : ('chmod +x ' + fn + ' && ./' + fn + ' --max 3'));
+                    pluginHandler.pkgmanager.pkgMsg('Downloader COMPILATO esportato: ' + fn + ' (' + Math.round(blob.size / 1048576) + 'MB, inventario incorporato) — su una macchina con internet: ' + runCmd + ' (o senza --max per tutto) → copia os-updates/ nello store (My Files) → «Importa manifest…».');
+                }).catch(function (err) { pluginHandler.pkgmanager.pkgMsg('Download del downloader fallito: ' + err); });
+                return;
+            }
+            var script = String(m.script || '');
             if (script == '') { pluginHandler.pkgmanager.pkgMsg('Il server non ha prodotto il downloader.'); return; }
-            var blob = new Blob([script], { type: 'text/x-python' });
-            var a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = String(((message != null) ? message.filename : '') || 'meshos-downloader.py');
-            document.body.appendChild(a); a.click();
-            setTimeout(function () { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) { } }, 2000);
-            pluginHandler.pkgmanager.pkgMsg('Downloader esportato: ' + a.download + ' (' + Math.round(script.length / 1024) + 'KB, inventario incorporato) — eseguilo con python3 su una macchina con internet, copia os-updates/ nello store (My Files) e «Importa manifest…».');
+            var blob2 = new Blob([script], { type: 'text/x-python' });
+            var a2 = document.createElement('a');
+            a2.href = URL.createObjectURL(blob2);
+            a2.download = String(m.filename || 'meshos-downloader.py');
+            document.body.appendChild(a2); a2.click();
+            setTimeout(function () { try { URL.revokeObjectURL(a2.href); a2.remove(); } catch (e4) { } }, 2000);
+            pluginHandler.pkgmanager.pkgMsg('Downloader Python esportato: ' + a2.download + ' (' + Math.round(script.length / 1024) + 'KB, inventario incorporato) — eseguilo con python3 su una macchina con internet, copia os-updates/ nello store (My Files) e «Importa manifest…».');
         } catch (e) { pluginHandler.pkgmanager.pkgMsg('Esportazione fallita: ' + e); }
     };
 
@@ -2110,6 +2152,47 @@ log('prossimo passo: copia ' + OUT_DIR + '/ nello store del server (My Files -> 
         return pre + 'INVENTORY = ' + JSON.stringify(inv) + '\n\n' + post;
     };
 
+    // v1.9.0: compiled downloader binaries shipped with the plugin (one per
+    // OS, like the meshagents). The server patches the scan inventory into
+    // the binary's embedded slot (byte-for-byte, exactly like MeshCentral
+    // patches the meshagent .msh) and serves it over /pkgstore.ashx.
+    obj.pkgDownloaderPlatforms = ['win-x64', 'win-x86', 'linux-x64', 'linux-arm64', 'linux-arm', 'macos-x64', 'macos-arm64'];
+    obj.pkgDownloaderSlot = 2097152; // 2MB inventory slot between the markers
+    obj.pkgDownloaderBin = function (session, platform, machines) {
+        try {
+            var binPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'bin', 'meshos-downloader-' + platform + ((platform.indexOf('win') === 0) ? '.exe' : ''));
+            parent.fs.readFile(binPath, function (err, data) {
+                try {
+                    if ((err != null) || (data == null)) { obj.replyCatalog(session, null, 'Binario del downloader non trovato per ' + platform + ' (plugins/pkgmanager/bin/): ' + err); return; }
+                    var mstart = '__MESHOS_INVENTORY_START__';
+                    var mend = '__MESHOS_INVENTORY_END__';
+                    // The marker STRINGS also live in the binary as .rodata
+                    // literals (Go constants): the REAL embedded slot is the
+                    // occurrence whose end marker sits at the exact slot
+                    // distance — iterate occurrences until it is found.
+                    var sIdx = -1;
+                    var probe = data.indexOf(mstart);
+                    while (probe >= 0) {
+                        if (data.indexOf(mend, probe + mstart.length + obj.pkgDownloaderSlot) === (probe + mstart.length + obj.pkgDownloaderSlot)) { sIdx = probe; break; }
+                        probe = data.indexOf(mstart, probe + 1);
+                    }
+                    if (sIdx < 0) { obj.replyCatalog(session, null, 'Slot inventario non trovato nel binario ' + platform + ' (binario corrotto?).'); return; }
+                    var inv = Buffer.from(JSON.stringify(machines), 'utf8');
+                    if (inv.length > obj.pkgDownloaderSlot) { obj.replyCatalog(session, null, 'Inventario troppo grande (' + Math.round(inv.length / 1024) + 'KB > 2MB): esporta meno macchine per volta o usa il downloader py.'); return; }
+                    var bin = Buffer.from(data); // writable copy
+                    inv.copy(bin, sIdx + mstart.length); // payload + implicit \0 padding
+                    var outDir = parent.path.join(obj.storePath, '_downloader');
+                    try { parent.fs.rmSync(outDir, { recursive: true, force: true }); } catch (e) { }
+                    parent.fs.mkdirSync(outDir, { recursive: true });
+                    var fname = 'meshos-downloader-' + platform + ((platform.indexOf('win') === 0) ? '.exe' : '');
+                    parent.fs.writeFileSync(parent.path.join(outDir, fname), bin);
+                    console.log('pkgmanager[server]: exportdownloader -> binario ' + fname + ' (' + Math.round(bin.length / 1048576) + 'MB, inventario ' + Math.round(inv.length / 1024) + 'KB patchato nello slot)');
+                    session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgDownloaderReady', platform: platform, file: fname, size: bin.length });
+                } catch (e) { obj.replyCatalog(session, null, 'Patch binario fallita: ' + e); }
+            });
+        } catch (e) { obj.replyCatalog(session, null, 'Patch binario fallita: ' + e); }
+    };
+
     obj.serveraction = function (command, session, parent2) {
         console.log('pkgmanager[server]: serveraction ' + command.pluginaction + ' from user ' + command.userid);
         var isAdmin = ((session != null) && (session.user != null) && (session.user.siteadmin === 0xFFFFFFFF));
@@ -2241,21 +2324,26 @@ log('prossimo passo: copia ' + OUT_DIR + '/ nello store del server (My Files -> 
             return;
         }
 
-        // v1.8.0: «Esporta downloader…» — GENERATES the stand-alone PYTHON
-        // downloader (meshos-downloader.py) with the scan inventory ALREADY
-        // EMBEDDED and hands it to the admin through MeshCentral itself (LAN
-        // download, admin-only). For an AIRGAP server this is THE way to
-        // fetch OS updates: run the script on any machine with internet,
-        // copy os-updates/ into the store (My Files), «Importa manifest…».
+        // v1.9.0: «Esporta downloader…» — COMPILED per-platform downloader
+        // (like the meshagents): the server patches the scan inventory into
+        // the binary's embedded slot and serves it over /pkgstore.ashx (LAN,
+        // admin-only). platform 'py' keeps the v1.8.0 stand-alone Python
+        // script as the documented fallback.
         if (command.pluginaction == 'exportdownloader') {
             if (!isAdmin) { console.log('pkgmanager[server]: denied exportdownloader for user ' + command.userid + ' (not full site admin)'); deny(); return; }
             var xmachs = command.machines;
             if ((xmachs == null) || (Array.isArray(xmachs) !== true) || (xmachs.length === 0)) { obj.replyCatalog(session, null, 'Nessuna macchina nella scansione: prima fai «Scansiona macchine» dalla vista Aggiornamenti OS.'); return; }
-            try {
-                var xscript = obj.buildPyDownloader(xmachs);
-                console.log('pkgmanager[server]: exportdownloader -> meshos-downloader.py (' + Math.round(xscript.length / 1024) + 'KB, ' + xmachs.length + ' macchina/e incorporate)');
-                session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgDownloaderReady', filename: 'meshos-downloader.py', script: xscript });
-            } catch (e) { obj.replyCatalog(session, null, 'Generazione downloader fallita: ' + e); }
+            var xplat = String(command.platform || '');
+            if (xplat == 'py') {
+                try {
+                    var xscript = obj.buildPyDownloader(xmachs);
+                    console.log('pkgmanager[server]: exportdownloader -> meshos-downloader.py (' + Math.round(xscript.length / 1024) + 'KB, ' + xmachs.length + ' macchina/e incorporate)');
+                    session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgDownloaderReady', filename: 'meshos-downloader.py', script: xscript });
+                } catch (e) { obj.replyCatalog(session, null, 'Generazione downloader fallita: ' + e); }
+                return;
+            }
+            if (obj.pkgDownloaderPlatforms.indexOf(xplat) < 0) { obj.replyCatalog(session, null, 'Piattaforma non valida: ' + xplat + '. Disponibili: ' + obj.pkgDownloaderPlatforms.join(', ') + ' (oppure py per lo script Python).'); return; }
+            obj.pkgDownloaderBin(session, xplat, xmachs);
             return;
         }
 
