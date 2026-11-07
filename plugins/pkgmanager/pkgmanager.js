@@ -1,5 +1,5 @@
 /**
- * MeshCentral Package Manager plugin ("pkgmanager") — v1.6.0.
+ * MeshCentral Package Manager plugin ("pkgmanager") — v1.6.1.
  *
  * Design: the catalog lives server-side (catalog.json next to this file).
  * The plugin pages are TABS IN THE TOP GRAY BAR (their own
@@ -34,6 +34,12 @@
  *     BUILDER (v0.9.0) — ONE single form with an OS dropdown (like the
  *     other options): switching OS swaps artifact/type/timeout/command
  *     fields and a per-OS draft in memory never loses anything. Airgap
+ *     v1.6.1 IMPORT MANIFEST: «Importa manifest…» in Gestione aggiornamenti —
+ *     the client reads a meshos-fetch manifest.json (file picker), the
+ *     server verifies EVERY file already sits in store/<bundle-id>/, builds
+ *     the kind:'os' bundle (artifacts[] + per-extension install commands
+ *     with {{url:N}}/{{sha384:N}} placeholders) and saves it through the
+ *     existing save path (admin-only, kind-aware guards).
  *     v1.6.0 OS-UPDATE SCANNER: «Scansiona macchine» in the OS view sends
  *     a per-OS inventory command to EVERY online machine (Linux dpkg-query,
  *     Windows Get-HotFix + build, macOS sw_vers + softwareupdate history)
@@ -106,13 +112,13 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '1.6.0';
+    obj.version = '1.6.1';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgOsCreateOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgOsCreateOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -330,6 +336,40 @@ module.exports.pkgmanager = function (parent) {
             if (bo != null) bo.style.opacity = '1';
             pluginHandler.pkgmanager.pkgCreateRender();
         } catch (e) { console.log('pkgmanager os create open failed: ' + e); }
+    };
+
+    // v1.6.1: «Importa manifest…» — reads a meshos-fetch manifest.json in the
+    // browser, asks the bundle id (the store folder the files were copied
+    // into) and sends it to the server, which verifies every file and
+    // builds+ saves the kind:'os' bundle through the normal save path.
+    obj.pkgOsImportManifest = function () {
+        try {
+            var inp = document.getElementById('pkgOsManifestFile');
+            if (inp == null) {
+                inp = document.createElement('input');
+                inp.type = 'file';
+                inp.id = 'pkgOsManifestFile';
+                inp.style.display = 'none';
+                inp.accept = '.json,application/json';
+                document.body.appendChild(inp);
+                inp.addEventListener('change', function () { pluginHandler.pkgmanager.pkgOsImportManifest(); });
+            }
+            if (inp.value == '') { inp.click(); return; }
+            var f = (inp.files != null) ? inp.files[0] : null;
+            inp.value = '';
+            if (f == null) return;
+            f.text().then(function (txt) {
+                var man = null;
+                try { man = JSON.parse(txt); } catch (e) { pluginHandler.pkgmanager.pkgAdminStatus('Manifest non JSON: ' + e); return; }
+                if ((man == null) || (Array.isArray(man.files) !== true) || (man.files.length === 0)) { pluginHandler.pkgmanager.pkgAdminStatus('Manifest non valido: serve files[] non vuoto (generato da meshos-fetch).'); return; }
+                var pid = prompt('ID del bundle OS (cartella dello store in cui hai copiato i file, es. os-updates):', 'os-updates');
+                if ((pid == null) || (String(pid).trim() == '')) { pluginHandler.pkgmanager.pkgAdminStatus('Import annullato.'); return; }
+                var nm = prompt('Nome del bundle (mostrato nelle liste):', 'Aggiornamenti OS importati');
+                if ((nm == null) || (String(nm).trim() == '')) nm = 'Aggiornamenti OS';
+                meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'importmanifest', pkgid: String(pid).trim(), name: String(nm).trim(), manifest: man });
+                pluginHandler.pkgmanager.pkgAdminStatus('Import manifest: ' + man.files.length + ' file — verifica file nello store e salvataggio in corso…');
+            });
+        } catch (e) { pluginHandler.pkgmanager.pkgAdminStatus('Import fallito: ' + e); }
     };
 
     obj.pkgAdminOpen = function () {
@@ -661,7 +701,7 @@ module.exports.pkgmanager = function (parent) {
             if ((cat == null) || (cat.packages == null)) { m.innerHTML = '<div style="color:#888">Caricamento catalogo…</div>'; return; }
             var isOs = pluginHandler.pkgmanager.pkgIsOsView();
             var x = '<div style="margin-bottom:8px;font-size:16px"><b>' + (isOs ? 'Gestione aggiornamenti' : 'Gestione pacchetti') + '</b> — ' + (isOs ? 'bundle OS airgap' : 'catalogo e artefatti airgap') + '</div>';
-            x += '<div style="margin-bottom:8px"><input type=button value="' + (isOs ? 'Aggiungi aggiornamento' : 'Aggiungi pacchetto') + '" onclick="pluginHandler.pkgmanager.pkgAdminAdd()"> <input type=button value="Ricarica catalogo" onclick="pluginHandler.pkgmanager.pkgAdminRefresh()"></div>';
+            x += '<div style="margin-bottom:8px"><input type=button value="' + (isOs ? 'Aggiungi aggiornamento' : 'Aggiungi pacchetto') + '" onclick="pluginHandler.pkgmanager.pkgAdminAdd()"> <input type=button value="Ricarica catalogo" onclick="pluginHandler.pkgmanager.pkgAdminRefresh()"> ' + (isOs ? '<input type=button value="Importa manifest…" title="Importa un manifest.json generato da meshos-fetch (i file devono essere gia stati copiati nello store del server)" onclick="pluginHandler.pkgmanager.pkgOsImportManifest()">' : '') + '</div>';
             if ((window.pkgmanagerAdminMsg != null) && (window.pkgmanagerAdminMsg != '')) { x += '<div style="margin-bottom:8px;color:#080">' + EscapeHtml(window.pkgmanagerAdminMsg) + '</div>'; }
             x += '<table style="border-collapse:collapse;width:100%">';
             x += '<tr style="text-align:left;border-bottom:1px solid #ccc"><th style="padding:4px">Pacchetto</th><th style="padding:4px">Definizioni OS / artefatto</th><th style="padding:4px">Azioni</th></tr>';
@@ -1759,6 +1799,69 @@ module.exports.pkgmanager = function (parent) {
         function deny() { try { session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgDenied', msg: 'Operazioni di gestione riservate agli amministratori del server.' }); } catch (e) { } }
 
         if (command.pluginaction == 'list') { obj.replyCatalog(session, null, null); return; }
+
+        // v1.6.1: import a meshos-fetch manifest into a kind:'os' bundle.
+        // Verifies every file already exists in store/<pkgid>/, builds the
+        // per-OS bundle defs (artifacts[] + chained install commands with
+        // {{url:N}}/{{sha384:N}} placeholders), then falls through into the
+        // normal save branch (admin check + kind-aware guards included).
+        if (command.pluginaction == 'importmanifest') {
+            var man = command.manifest;
+            if ((man == null) || (Array.isArray(man.files) !== true) || (man.files.length === 0)) { obj.replyCatalog(session, null, 'Manifest non valido (serve files[], generato da meshos-fetch).'); return; }
+            var pkgid = String(command.pkgid || '');
+            if (!/^[a-zA-Z0-9._-]+$/.test(pkgid)) { obj.replyCatalog(session, null, 'ID bundle non valido (lettere, numeri, . _ -).'); return; }
+            var byOs = { linux: [], windows: [], macos: [] };
+            var missing = [];
+            for (var fi = 0; fi < man.files.length; fi++) {
+                var fe = man.files[fi];
+                var fname = String((fe != null) ? (fe.file || '') : '');
+                if (!/^[a-zA-Z0-9._-]+$/.test(fname)) { missing.push(((fname || '(vuoto)') + ' (nome non valido)')); continue; }
+                var full = parent.path.join(obj.storePath, pkgid, fname);
+                if (!parent.fs.existsSync(full)) { missing.push(fname); continue; }
+                var os2 = String((fe != null) ? (fe.os || '') : '');
+                if ((os2 != 'linux') && (os2 != 'windows') && (os2 != 'macos')) {
+                    var dot2 = fname.lastIndexOf('.'); var ext2 = fname.slice(dot2 + 1).toLowerCase();
+                    os2 = ((ext2 == 'deb') || (ext2 == 'rpm') || (ext2 == 'apk')) ? 'linux' : (((ext2 == 'msi') || (ext2 == 'msu') || (ext2 == 'cab')) ? 'windows' : 'macos');
+                }
+                byOs[os2].push(fe);
+            }
+            if (missing.length > 0) { obj.replyCatalog(session, null, 'File mancanti nello store — copiali in plugins/pkgmanager/store/' + pkgid + '/: ' + missing.join(', ')); return; }
+            var pkgB = { id: pkgid, name: String(command.name || pkgid), description: 'Bundle OS importato da meshos-fetch (' + String((man.generated != null) ? man.generated : '') + ') — airgap', kind: 'os' };
+            for (var osk in byOs) {
+                var fl = byOs[osk];
+                if (fl.length === 0) continue;
+                var parts2 = [], insts2 = [];
+                for (var fk = 0; fk < fl.length; fk++) {
+                    var f2 = fl[fk]; var fn = String(f2.file);
+                    var dd = fn.lastIndexOf('.'); var b2 = ((dd > 0) ? fn.slice(0, dd) : fn); var e2 = fn.slice(dd + 1).toLowerCase();
+                    if (osk == 'linux') {
+                        parts2.push("curl -kfsSL -o /tmp/" + fn + " '{{url:" + (fk + 1) + "}}' && echo '{{sha384:" + (fk + 1) + "}}  /tmp/" + fn + "' | sha384sum -c -");
+                        if (e2 == 'deb') { insts2.push('sudo -n dpkg -i /tmp/' + fn); }
+                        else if (e2 == 'rpm') { insts2.push('sudo -n rpm -Uvh --force /tmp/' + fn); }
+                        else if (e2 == 'apk') { insts2.push('sudo -n apk add --allow-untrusted /tmp/' + fn); }
+                        else { insts2.push('sh /tmp/' + fn); }
+                    } else if (osk == 'windows') {
+                        var dst2 = '"%TEMP%\\' + fn + '"';
+                        parts2.push('curl -kfsSL -o ' + dst2 + ' "{{url:' + (fk + 1) + '}}" && certutil -hashfile ' + dst2 + ' SHA384 | findstr /i "{{sha384:' + (fk + 1) + '}}"');
+                        if (e2 == 'msi') { insts2.push('msiexec /i ' + dst2 + ' /qn'); }
+                        else if (e2 == 'msu') { insts2.push('wusa ' + dst2 + ' /quiet /norestart'); }
+                        else if (e2 == 'cab') { insts2.push('dism /Online /Add-Package /PackagePath:' + dst2 + ' /NoRestart /Quiet'); }
+                        else { insts2.push(dst2 + ' /S'); }
+                    } else {
+                        parts2.push("curl -kfsSL -o /tmp/" + fn + " '{{url:" + (fk + 1) + "}}' && echo '{{sha384:" + (fk + 1) + "}}  /tmp/" + fn + "' | shasum -a 384 -c -");
+                        if (e2 == 'pkg') { insts2.push('sudo -n installer -pkg /tmp/' + fn + ' -target /'); }
+                        else if (e2 == 'app') { insts2.push('cp -R /tmp/' + fn + ' /Applications/'); }
+                        else { insts2.push('sh /tmp/' + fn); }
+                    }
+                }
+                var cmd2 = parts2.join(' && ');
+                if (insts2.length > 0) { cmd2 += ' && ' + insts2.join(' && '); }
+                pkgB[osk] = { type: ((osk == 'windows') ? 1 : 3), cmd: cmd2, artifacts: fl.map(function (x) { return String(x.file); }), timeout: 900, kind: 'os' };
+            }
+            console.log('pkgmanager[server]: import manifest -> bundle ' + pkgid + ' (' + man.files.length + ' file)');
+            command.pkg = pkgB;
+            command.pluginaction = 'save';
+        }
 
         if ((command.pluginaction == 'save') || (command.pluginaction == 'delete')) {
             if (!isAdmin) { console.log('pkgmanager[server]: denied ' + command.pluginaction + ' for user ' + command.userid + ' (not full site admin)'); deny(); return; }
