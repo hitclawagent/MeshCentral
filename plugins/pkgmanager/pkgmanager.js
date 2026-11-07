@@ -1,5 +1,5 @@
 /**
- * MeshCentral Package Manager plugin ("pkgmanager") — v1.3.0.
+ * MeshCentral Package Manager plugin ("pkgmanager") — v1.4.0.
  *
  * Design: the catalog lives server-side (catalog.json next to this file).
  * The plugin pages are TABS IN THE TOP GRAY BAR (their own
@@ -34,6 +34,14 @@
  *     BUILDER (v0.9.0) — ONE single form with an OS dropdown (like the
  *     other options): switching OS swaps artifact/type/timeout/command
  *     fields and a per-OS draft in memory never loses anything. Airgap
+ *     v1.4.0 SEPARATE OS-UPDATES VIEW: OS updates are managed SEPARATELY
+ *     from software packages — a second sidebar icon (shield emoji
+ *     «Aggiornamenti OS») opens its OWN tab + view that lists ONLY
+ *     kind:'os' update bundles; the package views («Installa/Elimina»,
+ *     «Gestione», per-device tab) show ONLY apps. A «Categoria» field in
+ *     both forms (Applicazione / Aggiornamento OS) sets pkg.kind, carried
+ *     per-OS in def.kind and persisted by sanitizeDef + the server save;
+ *     every view filters on it. Install/delete mechanics UNCHANGED, shared.
  *     v1.3.0 OS-UPDATE BUNDLES (airgap): a package can carry MULTIPLE
  *     store files per OS (space/comma separated list in the artifact field):
  *     every file gets its own LAN download + SHA-384 verification line with
@@ -82,13 +90,13 @@
 module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var obj = {};
-    obj.version = '1.3.0';
+    obj.version = '1.4.0';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -120,6 +128,15 @@ module.exports.pkgmanager = function (parent) {
             // Icon sized to match the other sidebar entries (.lbtg is 62x62).
             b.innerHTML = '<div style="position:absolute;top:8px;left:0;width:100%;text-align:center;font-size:46px;line-height:58px">📦</div>';
             lb.appendChild(b);
+            // v1.4.0: SECOND sidebar entry — OS updates managed SEPARATELY.
+            var b2 = document.createElement('div');
+            b2.id = 'LeftMenuOsUpdates';
+            b2.className = 'lbbutton';
+            b2.title = 'Aggiornamenti del sistema operativo (airgap)';
+            b2.setAttribute('tabindex', '0');
+            b2.setAttribute('onmouseup', 'pluginHandler.pkgmanager.pkgOsSidebarOpen()');
+            b2.innerHTML = '<div style="position:absolute;top:8px;left:0;width:100%;text-align:center;font-size:46px;line-height:58px">🛡️</div>';
+            lb.appendChild(b2);
             var col = document.getElementById('column_l');
             if (col == null) return;
             var page = document.createElement('div');
@@ -147,6 +164,7 @@ module.exports.pkgmanager = function (parent) {
                     + '<td tabindex=0 id="MainTabPackages" class="topbar_td style3x" style="padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgSidebarOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgSidebarOpen()">Installa/Elimina pacchetti</td>'
                     + '<td tabindex=0 id="MainTabPkgMgmt" class="topbar_td style3x" style="display:none;padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgAdminOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgAdminOpen()">Gestione pacchetti</td>'
                     + '<td tabindex=0 id="MainTabPkgCreate" class="topbar_td style3x" style="display:none;padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgCreateOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgCreateOpen()">Creazione pacchetti</td>'
+                    + '<td tabindex=0 id="MainTabOsUpdates" class="topbar_td style3x" style="padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgOsSidebarOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgOsSidebarOpen()">Aggiornamenti OS</td>'
                     + '<td class="topbar_td_end style3">&nbsp;</td>'
                     + '</tr></table>';
                 sub.parentNode.insertBefore(span, sub.nextSibling);
@@ -175,6 +193,7 @@ module.exports.pkgmanager = function (parent) {
             var t1 = document.getElementById('MainTabPackages');
             var t2 = document.getElementById('MainTabPkgMgmt');
             var t3 = document.getElementById('MainTabPkgCreate');
+            var t4 = document.getElementById('MainTabOsUpdates');
             var adm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
             if (t2 != null) { t2.style.display = adm ? '' : 'none'; }
             if (t3 != null) { t3.style.display = adm ? '' : 'none'; }
@@ -182,10 +201,10 @@ module.exports.pkgmanager = function (parent) {
             // device sub-view owns the gray bar (goPageStart passes hideRow
             // for x 9..19 — the same bar renders General/Desktop/... there).
             span.style.display = (hideRow === true) ? 'none' : '';
-            var ts = [t1, t2, t3];
+            var ts = [t1, t2, t3, t4];
             for (var i = 0; i < ts.length; i++) { if (ts[i] != null) { ts[i].classList.remove('fullselect'); } }
             if (which != null) {
-                var a = { install: t1, admin: t2, create: t3 }[which];
+                var a = { install: t1, admin: t2, create: t3, os: t4 }[which];
                 if (a != null) { a.classList.add('fullselect'); }
                 try { QC('column_l').add('room4submenu'); } catch (e) { }
             } else {
@@ -209,6 +228,8 @@ module.exports.pkgmanager = function (parent) {
             if (w != null) w.style.display = 'none';
             var b = document.getElementById('LeftMenuPackages');
             if (b != null) b.style.opacity = '';
+            var bo = document.getElementById('LeftMenuOsUpdates');
+            if (bo != null) bo.style.opacity = '';
         } catch (e) { }
     };
 
@@ -292,6 +313,7 @@ module.exports.pkgmanager = function (parent) {
             x += '<tr><td style="padding:4px">ID</td><td style="padding:4px"><input type=text id=pkgfId style=width:280px oninput="pluginHandler.pkgmanager.pkgCreateCheckId();pluginHandler.pkgmanager.pkgCreateDraftSync()"> <span id=pkgfIdHint style="color:#888"></span></td></tr>';
             x += '<tr><td style="padding:4px">Nome</td><td style="padding:4px"><input type=text id=pkgfName style=width:280px oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></td></tr>';
             x += '<tr><td style="padding:4px">Descrizione</td><td style="padding:4px"><input type=text id=pkgfDesc style=width:420px oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></td></tr>';
+            x += '<tr><td style="padding:4px">Categoria</td><td style="padding:4px"><select id=pkgfKind style=width:280px onchange="pluginHandler.pkgmanager.pkgCreateDraftSync()"><option value="">Applicazione (gestione pacchetti)</option><option value="os">Aggiornamento del sistema operativo (airgap)</option></select> <span style="color:#888;font-size:12px">gli aggiornamenti OS compaiono solo nella voce 🛡️ «Aggiornamenti OS»</span></td></tr>';
             x += '<tr><td style="padding:4px">Sistema operativo</td><td style="padding:4px"><select id=pkgfOs onchange="pluginHandler.pkgmanager.pkgCreateOsChange()"><option value=linux selected>Linux</option><option value=windows>Windows</option><option value=macos>macOS</option></select> <span id=pkgfOsHint style="color:#888"></span></td></tr>';
             x += '<tr><td style="padding:4px">Artefatto (file nello store)</td><td style="padding:4px"><input type=text id=pkgfArt style=width:280px oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"> <input type=button value="Carica artefatto…" onclick="pluginHandler.pkgmanager.pkgCreateUpload()"> <input type=button value="Elimina artefatto" onclick="pluginHandler.pkgmanager.pkgCreateArtifactDel()"></td></tr>';
             x += '<tr><td style="padding:4px">Tipo comando</td><td style="padding:4px"><select id=pkgfType onchange="pluginHandler.pkgmanager.pkgCreateDraftSync()"><option value=3>Shell (Linux/macOS)</option><option value=1>cmd.exe (Windows)</option><option value=2>PowerShell (Windows)</option></select> · Timeout (s): <input type=text id=pkgfTo style=width:70px value=300 oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></td></tr>';
@@ -305,7 +327,7 @@ module.exports.pkgmanager = function (parent) {
             m.innerHTML = x;
             // Restore the draft: tab re-open re-renders, typed data lives in memory.
             var db = window.pkgmanagerDraftBase;
-            if (db != null) { Q('pkgfId').value = db.id || ''; Q('pkgfName').value = db.name || ''; Q('pkgfDesc').value = db.desc || ''; }
+            if (db != null) { Q('pkgfId').value = db.id || ''; Q('pkgfName').value = db.name || ''; Q('pkgfDesc').value = db.desc || ''; Q('pkgfKind').value = db.kind || ''; }
             var osCur = window.pkgmanagerDraftOs || 'linux';
             Q('pkgfOs').value = osCur;
             var dd = ((window.pkgmanagerDraft != null) ? window.pkgmanagerDraft[osCur] : null);
@@ -329,7 +351,7 @@ module.exports.pkgmanager = function (parent) {
     obj.pkgCreateFieldSync = function (os) {
         try {
             if (window.pkgmanagerDraft == null) { window.pkgmanagerDraft = {}; }
-            window.pkgmanagerDraft[os] = { art: Q('pkgfArt').value.trim(), type: String(Q('pkgfType').value), to: Q('pkgfTo').value.trim(), cmd: Q('pkgfCmd').value, un: Q('pkgfUn').value };
+            window.pkgmanagerDraft[os] = { art: Q('pkgfArt').value.trim(), type: String(Q('pkgfType').value), to: Q('pkgfTo').value.trim(), cmd: Q('pkgfCmd').value, un: Q('pkgfUn').value, kind: Q('pkgfKind').value };
         } catch (e) { }
     };
     // Sync base fields + the current-OS draft. Wizard-only: a no-op in the
@@ -339,7 +361,7 @@ module.exports.pkgmanager = function (parent) {
         try {
             if (window.pkgmanagerView !== 'create') return;
             pluginHandler.pkgmanager.pkgCreateFieldSync(pluginHandler.pkgmanager.pkgCreateCurOs());
-            window.pkgmanagerDraftBase = { id: Q('pkgfId').value.trim(), name: Q('pkgfName').value, desc: Q('pkgfDesc').value };
+            window.pkgmanagerDraftBase = { id: Q('pkgfId').value.trim(), name: Q('pkgfName').value, desc: Q('pkgfDesc').value, kind: Q('pkgfKind').value };
         } catch (e) { }
     };
     obj.pkgCreateOsChange = function () {
@@ -400,7 +422,7 @@ module.exports.pkgmanager = function (parent) {
             var os = pluginHandler.pkgmanager.pkgCreateCurOs();
             pluginHandler.pkgmanager.pkgCreateFieldSync(os);
             window.pkgmanagerDraftBase = { id: pid, name: name, desc: Q('pkgfDesc').value };
-            var pkg = { id: pid, name: name, description: Q('pkgfDesc').value };
+            var pkg = { id: pid, name: name, description: Q('pkgfDesc').value, kind: Q('pkgfKind').value };
             for (var k in window.pkgmanagerDraft) {
                 var d = window.pkgmanagerDraft[k];
                 if ((k == 'linux') || (k == 'windows') || (k == 'macos')) {
@@ -413,6 +435,7 @@ module.exports.pkgmanager = function (parent) {
                             if (an.length > 1) { def.artifacts = an; } else { def.artifact = an[0]; }
                         }
                         if ((d.un != null) && (d.un.trim() != '')) { def.uninstall = d.un.trim(); }
+                        if ((d.kind != null) && (String(d.kind).trim() != '')) { def.kind = String(d.kind).trim(); }
                         pkg[k] = def;
                     }
                 }
@@ -597,7 +620,7 @@ module.exports.pkgmanager = function (parent) {
     obj.pkgAdminFieldSync = function (os) {
         try {
             if (window.pkgmanagerAdminDraft == null) { window.pkgmanagerAdminDraft = {}; }
-            window.pkgmanagerAdminDraft[os] = { art: Q('pkgfArt').value.trim(), type: String(Q('pkgfType').value), to: Q('pkgfTo').value.trim(), cmd: Q('pkgfCmd').value, un: Q('pkgfUn').value };
+            window.pkgmanagerAdminDraft[os] = { art: Q('pkgfArt').value.trim(), type: String(Q('pkgfType').value), to: Q('pkgfTo').value.trim(), cmd: Q('pkgfCmd').value, un: Q('pkgfUn').value, kind: String(Q('pkgfKind').value || '') };
         } catch (e) { }
     };
     // Sync the CURRENT-OS fields into the management draft. Management-only:
@@ -659,6 +682,7 @@ module.exports.pkgmanager = function (parent) {
             x += '<tr><td style="padding:4px">ID</td><td style="padding:4px"><input type=text id=pkgfId style=width:280px value="' + EscapeHtml(isNew ? '' : pkg.id) + '"' + (isNew ? '' : ' readonly') + '></td></tr>';
             x += '<tr><td style="padding:4px">Nome</td><td style="padding:4px"><input type=text id=pkgfName style=width:280px value="' + EscapeHtml(isNew ? '' : (pkg.name || '')) + '"></td></tr>';
             x += '<tr><td style="padding:4px">Descrizione</td><td style="padding:4px"><input type=text id=pkgfDesc style=width:420px value="' + EscapeHtml(isNew ? '' : (pkg.description || '')) + '"></td></tr>';
+            x += '<tr><td style="padding:4px">Categoria</td><td style="padding:4px"><select id=pkgfKind style=width:280px onchange="pluginHandler.pkgmanager.pkgAdminDraftSync()"><option value="">Applicazione (gestione pacchetti)</option><option value="os">Aggiornamento del sistema operativo (airgap)</option></select> <span style="color:#888;font-size:12px">gli aggiornamenti OS compaiono solo nella voce 🛡️ «Aggiornamenti OS»</span></td></tr>';
             x += '</table>';
             // v0.9.1 single form: per-OS drafts seeded from the package, the OS
             // dropdown swaps the fields (same pattern as the builder).
@@ -670,7 +694,7 @@ module.exports.pkgmanager = function (parent) {
                 var def = ((pkg != null) ? pkg[os] : null);
                 if (def != null) {
                     var seedArt = ((def.artifacts != null) && (def.artifacts.length > 0)) ? def.artifacts.join(' ') : ((def.artifact != null) ? String(def.artifact) : '');
-                    draft[os] = { art: seedArt, type: String(def.type), to: ((def.timeout != null) ? String(def.timeout) : '300'), cmd: String(def.cmd || ''), un: ((def.uninstall != null) ? String(def.uninstall) : '') };
+                    draft[os] = { art: seedArt, type: String(def.type), to: ((def.timeout != null) ? String(def.timeout) : '300'), cmd: String(def.cmd || ''), un: ((def.uninstall != null) ? String(def.uninstall) : ''), kind: ((def.kind != null) ? String(def.kind) : ((pkg != null) ? String(pkg.kind || '') : '')) };
                     if (osCur == '') { osCur = os; }
                 }
             }
@@ -691,6 +715,7 @@ module.exports.pkgmanager = function (parent) {
             x += '<div style="margin-top:10px"><input type=button value="Salva" onclick="pluginHandler.pkgmanager.pkgAdminSave(' + (isNew ? 'true' : 'false') + ')"> <input type=button value="Annulla" onclick="pluginHandler.pkgmanager.pkgAdminRender()"> <input type=file id="pkgfFile" style="display:none"></div>';
             x += '<div id="pkgadminStatus" style="margin-top:6px;color:#888"></div>';
             m.innerHTML = x;
+            Q('pkgfKind').value = ((pkg != null) && (pkg.kind != null)) ? String(pkg.kind) : '';
             pluginHandler.pkgmanager.pkgAdminOsHint();
         } catch (e) { console.log('pkgmanager admin form failed: ' + e); }
     };
@@ -790,7 +815,7 @@ module.exports.pkgmanager = function (parent) {
             // the defs already saved for this ID (an untouched saved OS must
             // survive the server-side replace-on-id save).
             pluginHandler.pkgmanager.pkgAdminFieldSync(pluginHandler.pkgmanager.pkgAdminCurOs());
-            var pkg = { id: pid, name: name, description: Q('pkgfDesc').value };
+            var pkg = { id: pid, name: name, description: Q('pkgfDesc').value, kind: Q('pkgfKind').value };
             for (var k in window.pkgmanagerAdminDraft) {
                 var d = window.pkgmanagerAdminDraft[k];
                 if ((k == 'linux') || (k == 'windows') || (k == 'macos')) {
@@ -803,6 +828,7 @@ module.exports.pkgmanager = function (parent) {
                             if (an.length > 1) { def.artifacts = an; } else { def.artifact = an[0]; }
                         }
                         if ((d.un != null) && (d.un.trim() != '')) { def.uninstall = d.un.trim(); }
+                        if ((d.kind != null) && (String(d.kind).trim() != '')) { def.kind = String(d.kind).trim(); }
                         pkg[k] = def;
                     }
                 }
@@ -870,7 +896,7 @@ module.exports.pkgmanager = function (parent) {
         } catch (e) { console.log('pkgmanager device render failed: ' + e); }
     };
 
-    obj.pkgDevToggle = function () { pluginHandler.pkgmanager.pkgSidebarRender(); };
+    obj.pkgDevToggle = function () { if (window.pkgmanagerView == 'os') { pluginHandler.pkgmanager.pkgOsTable(); } else { pluginHandler.pkgmanager.pkgSidebarRender(); } }; // v1.4.0: view-aware
 
     obj.pkgDevSelectAll = function (v) {
         try { var cbs = document.querySelectorAll('.pkgmanagerDevCb'); for (var i = 0; i < cbs.length; i++) { if (!cbs[i].disabled) cbs[i].checked = v; } } catch (e) { }
@@ -902,7 +928,9 @@ module.exports.pkgmanager = function (parent) {
             var osList = Object.keys(oses);
             var shown = [];
             for (var i = 0; i < cat.packages.length; i++) {
-                var p = cat.packages[i]; var okp = true;
+                var p = cat.packages[i];
+                if (pluginHandler.pkgmanager.pkgOsKind(p) == 'os') { continue; } // v1.4.0: apps only
+                var okp = true;
                 for (var k = 0; k < osList.length; k++) { if (p[osList[k]] == null) { okp = false; break; } }
                 if (okp) { shown.push(p); }
             }
@@ -954,13 +982,16 @@ module.exports.pkgmanager = function (parent) {
                 } else {
                     var x = '<div style="padding:12px;font-family:Arial,Helvetica,sans-serif">';
                     x += '<div style="margin-bottom:8px">Installa un pacchetto su <b>questo dispositivo</b> (canale comandi remoti standard, permessi verificati).</div>';
-                    x += pluginHandler.pkgmanager.pkgTableHtml(cat.packages, 'tab');
+                    var apps = [];
+                    for (var ap = 0; ap < cat.packages.length; ap++) { if (pluginHandler.pkgmanager.pkgOsKind(cat.packages[ap]) != 'os') { apps.push(cat.packages[ap]); } }
+                    x += pluginHandler.pkgmanager.pkgTableHtml(apps, 'tab');
                     x += '<div id="pkgmanagerMsgTab" style="margin-top:10px;color:#888"></div></div>';
                     d.innerHTML = x;
                 }
             }
             if (window.pkgmanagerView == 'admin') { pluginHandler.pkgmanager.pkgAdminRender(); }
             else if (window.pkgmanagerView == 'create') { pluginHandler.pkgmanager.pkgCreateCatalogArrived(); }
+            else if (window.pkgmanagerView == 'os') { if (document.getElementById('pkgmanagerTableWrap') != null) { pluginHandler.pkgmanager.pkgOsTable(); } else { pluginHandler.pkgmanager.pkgOsRender(); } }
             else { pluginHandler.pkgmanager.pkgSidebarRender(); }
         } catch (e) { console.log('pkgmanager render failed: ' + e); }
     };
@@ -1004,6 +1035,107 @@ module.exports.pkgmanager = function (parent) {
             }
             return String(def.cmd);
         } catch (e) { return null; }
+    };
+
+    // ---- v1.4.0: SEPARATE OS-updates view (second sidebar icon) ----
+    // Opens its OWN view ('os'): same open/close mechanics as pkgSidebarOpen
+    // (hide the current core panel, reset xxcurrentView so a later go(x)
+    // fully restores it), but the list shows ONLY kind:'os' bundles.
+    obj.pkgOsSidebarOpen = function () {
+        try {
+            var w = document.getElementById('pkgmanagerMainWrap');
+            if (w == null) return;
+            try {
+                if ((typeof xxcurrentView == 'number') && (xxcurrentView >= 0) && (xxcurrentView <= 60)) { QV('p' + xxcurrentView, false); }
+                xxcurrentView = -1;
+            } catch (e) { }
+            w.style.display = '';
+            window.pkgmanagerView = 'os';
+            pluginHandler.pkgmanager.pkgTabSetActive('os');
+            var b = document.getElementById('LeftMenuPackages');
+            if (b != null) b.style.opacity = '';
+            var bo = document.getElementById('LeftMenuOsUpdates');
+            if (bo != null) bo.style.opacity = '1';
+            pluginHandler.pkgmanager.pkgOsRender();
+        } catch (e) { console.log('pkgmanager os open failed: ' + e); }
+    };
+
+    // kind helper: a package is an OS-update bundle when a def carries
+    // kind:'os'; everything else is an app (pre-v1.4.0 defs default to app).
+    obj.pkgOsKind = function (p) {
+        try {
+            var oses = ['linux', 'windows', 'macos'];
+            for (var k = 0; k < oses.length; k++) {
+                var d = ((p != null) ? p[oses[k]] : null);
+                if ((d != null) && (String(d.kind || '').trim() != '')) { return String(d.kind).trim(); }
+            }
+        } catch (e) { }
+        return '';
+    };
+
+    // OS-updates view, FULL layout: ONLY kind:'os' bundles + the machine
+    // picker + the SAME shared batch Install/Delete buttons and table.
+    obj.pkgOsRender = function () {
+        try {
+            var m = document.getElementById('pkgmanagerMain');
+            if (m == null) return;
+            var cat = window.pkgmanagerCatalog;
+            if ((cat == null) || (cat.packages == null)) { pluginHandler.pkgmanager.pkgRequestList(); return; }
+            if (window.pkgmanagerSelPkg == null) { window.pkgmanagerSelPkg = {}; }
+            var devlist = [];
+            try { for (var j in nodes) { if (nodes[j] && nodes[j]._id) devlist.push(nodes[j]); } } catch (e) { }
+            var x = '<div style="margin-bottom:8px;font-size:16px"><b>Aggiornamenti del sistema operativo</b> <span style="color:#888;font-weight:normal;font-size:12px">(airgap — bundle multi-file serviti da questo server in LAN)</span></div>';
+            x += '<div id="pkgmanagerSelSummary" style="margin-bottom:8px;color:#888"></div>';
+            x += '<div style="display:flex;gap:16px;align-items:flex-start">';
+            x += '<div style="flex:1 1 60%;min-width:0"><div style="margin-bottom:4px"><b>Bundle di aggiornamento OS</b> <span id="pkgmanagerFilterNote" style="color:#888;font-weight:normal"></span> <span style="font-size:12px">[<a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(true);return false">tutti</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(false);return false">nessuno</a>]</span></div>';
+            x += '<div style="margin-bottom:6px"><input type=button value="Installa selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'install\')"> <input type=button value="Elimina selezionati" title="Esegue il comando di disinstallazione sui dispositivi selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'delete\')"> <span id="pkgmanagerPkgSummary" style="color:#888;font-weight:normal"></span></div><div id="pkgmanagerTableWrap"></div></div>';
+            x += '<div style="flex:0 0 320px;border-left:1px solid #ddd;padding-left:12px">';
+            x += '<div style="margin-bottom:4px"><b>Macchine di destinazione</b> — <span style="font-size:12px"><a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(true);return false">tutte</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(false);return false">nessuna</a></span></div>';
+            x += '<div id="pkgmanagerDeviceList" style="max-height:420px;overflow-y:auto">';
+            if (devlist.length == 0) { x += '<div style="color:#888;padding:4px">Nessun dispositivo</div>'; }
+            for (var d = 0; d < devlist.length; d++) {
+                var nn = devlist[d];
+                var onn = ((nn.conn & 1) != 0);
+                var noss = pluginHandler.pkgmanager.pkgTargetOs(nn);
+                x += '<label style="display:block;padding:4px 2px;border-bottom:1px solid #eee;' + (onn ? 'cursor:pointer' : 'color:#999;cursor:not-allowed') + '">';
+                x += '<input type=checkbox class="pkgmanagerDevCb" value="' + EscapeHtml(nn._id) + '"' + (onn ? '' : ' disabled') + ' onchange="pluginHandler.pkgmanager.pkgDevToggle()"> ';
+                x += '<b>' + EscapeHtml(nn.name) + '</b> <span style="color:#888">· ' + noss + (onn ? ' · online' : ' · offline') + '</span></label>';
+            }
+            x += '</div><div style="margin-top:6px;color:#888;font-size:12px">Le macchine offline non sono selezionabili.</div>';
+            x += '</div></div>';
+            x += '<div id="pkgmanagerMsg" style="margin-top:10px;color:#888"></div>';
+            m.innerHTML = x;
+            pluginHandler.pkgmanager.pkgOsTable();
+        } catch (e) { console.log('pkgmanager os render failed: ' + e); }
+    };
+
+    // Table-only refresh of the OS view (keeps the device checkboxes):
+    // called on every device toggle while the OS view is open.
+    obj.pkgOsTable = function () {
+        try {
+            var cat = window.pkgmanagerCatalog;
+            var w = document.getElementById('pkgmanagerTableWrap');
+            if ((cat == null) || (cat.packages == null) || (w == null)) return;
+            var bundles = [];
+            for (var i = 0; i < cat.packages.length; i++) {
+                if (pluginHandler.pkgmanager.pkgOsKind(cat.packages[i]) == 'os') { bundles.push(cat.packages[i]); }
+            }
+            var sel = pluginHandler.pkgmanager.pkgSelectedNodes();
+            var oses = {}; for (var q = 0; q < sel.length; q++) { oses[pluginHandler.pkgmanager.pkgTargetOs(sel[q])] = 1; }
+            var osList = Object.keys(oses);
+            var shown = [];
+            for (var q2 = 0; q2 < bundles.length; q2++) {
+                var p2 = bundles[q2]; var okp = true;
+                for (var k2 = 0; k2 < osList.length; k2++) { if (p2[osList[k2]] == null) { okp = false; break; } }
+                if (okp) { shown.push(p2); }
+            }
+            var note = document.getElementById('pkgmanagerFilterNote');
+            if (note != null) { note.innerText = (osList.length ? ('(' + shown.length + ' di ' + bundles.length + ' mostrati — OS di destinazione: ' + osList.join(', ') + ')') : '(' + bundles.length + ' di ' + bundles.length + ' — seleziona le macchine per filtrare per OS)'); }
+            w.innerHTML = pluginHandler.pkgmanager.pkgTableHtml(shown, 'sidebar', osList);
+            var sum = document.getElementById('pkgmanagerSelSummary');
+            if (sum != null) { sum.innerText = (sel.length ? (sel.length + ' macchina/e selezionata/e — Install gira su TUTTE, raggruppate per OS.') : 'Seleziona le macchine di destinazione a destra; l\'elenco dei bundle si filtra per i loro OS.'); }
+            pluginHandler.pkgmanager.pkgPkgSummary();
+        } catch (e) { console.log('pkgmanager os table failed: ' + e); }
     };
 
     obj.pkgTableHtml = function (pkgs, mode, osList) {
@@ -1348,6 +1480,7 @@ module.exports.pkgmanager = function (parent) {
             if (arts.length > 0) { out.artifacts = arts; }
         }
         if ((typeof def.uninstall == 'string') && (def.uninstall.trim() != '')) { out.uninstall = def.uninstall.trim().slice(0, 4096); }
+        if ((typeof def.kind == 'string') && (def.kind.trim() == 'os')) { out.kind = 'os'; } // v1.4.0: OS-update bundle marker
         return out;
     };
 
@@ -1402,6 +1535,7 @@ module.exports.pkgmanager = function (parent) {
                 if ((typeof pkg.name != 'string') || (pkg.name.trim() == '')) { obj.replyCatalog(session, null, 'Nome pacchetto mancante.'); return; }
                 var clean = { id: pkg.id, name: pkg.name.trim() };
                 if (typeof pkg.description == 'string') { clean.description = pkg.description; }
+                if ((typeof pkg.kind == 'string') && (pkg.kind.trim() == 'os')) { clean.kind = 'os'; } // v1.4.0
                 var oses = ['linux', 'windows', 'macos'];
                 for (var k = 0; k < oses.length; k++) {
                     var def = obj.sanitizeDef(pkg[oses[k]]);
