@@ -103,6 +103,13 @@
  *     pkgmanager/bin/* with unzip (childProcess) + exec permissions, then
  *     re-verifies. Up to 5 attempts, 15min between failures; airgap servers
  *     just keep using py or copy bin/ manually.
+ *     v1.9.9 USER NOTICE WHILE BINARIES ARE PENDING: every pkgList reply
+ *     carries binMissing/binBusy/binAttempts; the client shows an amber
+ *     banner on top of the install, OS-updates and catalog views until all
+ *     7 binaries are present ("downloading in background — export limited
+ *     to py" / after 5 failed attempts: "not available — copy bin/
+ *     manually or configure pkgmanagerBinariesUrl"). The banner disappears
+ *     automatically once all binaries are in place.
  *     v1.9.0 COMPILED PER-PLATFORM DOWNLOADER: like the meshagents, the
  *     downloader ships COMPILED, one binary per OS — plugins/pkgmanager/
  *     bin/meshos-downloader-<platform> (win-x64, win-x86, linux-x64,
@@ -225,7 +232,7 @@ module.exports.pkgmanager = function (parent) {
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var vmMod = null; try { vmMod = require('vm'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.8';
+    obj.version = '1.9.9';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -895,7 +902,7 @@ module.exports.pkgmanager = function (parent) {
             var cat = window.pkgmanagerCatalog;
             if ((cat == null) || (cat.packages == null)) { m.innerHTML = '<div style="color:#888">Caricamento catalogo…</div>'; return; }
             var isOs = pluginHandler.pkgmanager.pkgIsOsView();
-            var x = '<div style="margin-bottom:8px;font-size:16px"><b>' + (isOs ? 'Gestione aggiornamenti' : 'Gestione pacchetti') + '</b> — ' + (isOs ? 'bundle OS airgap' : 'catalogo e artefatti airgap') + '</div>';
+            var x = '<div style="margin-bottom:8px;font-size:16px"><b>' + (isOs ? 'Gestione aggiornamenti' : 'Gestione pacchetti') + '</b> — ' + (isOs ? 'bundle OS airgap' : 'catalogo e artefatti airgap') + '</div>' + pluginHandler.pkgmanager.pkgBinBanner();
             // v1.9.5: filtro OS del catalogo (solo «Gestione pacchetti», non per i bundle OS)
             if (!isOs) { x += '<div style="margin-bottom:8px">Sistema operativo: <select id="pkgmanagerAdminOsSel" onchange="pluginHandler.pkgmanager.pkgAdminOsFilter()" style="padding:3px 5px"><option value="all">Tutti</option><option value="linux">Linux</option><option value="windows">Windows</option><option value="macos">macOS</option></select> <span id="pkgmanagerAdminOsCount" style="color:#888;font-size:12px"></span></div>'; }
             var updAdm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
@@ -1212,6 +1219,23 @@ module.exports.pkgmanager = function (parent) {
     };
 
     // ---- Install page: packages left, target machines right ----
+    // v1.9.9: banner ambra finché i binari del downloader non sono completi
+    obj.pkgBinBanner = function () {
+        try {
+            var miss = window.pkgmanagerBinMissing;
+            if ((miss == null) || (miss == 0)) { return ''; }
+            var busy = (window.pkgmanagerBinBusy === true);
+            var attempts = (window.pkgmanagerBinAttempts || 0);
+            var txt;
+            if (busy || (attempts < 5)) {
+                txt = '⏳ Binari del downloader compilato in scaricamento automatico in background (' + miss + ' piattaforme mancanti su 7) — finché non arrivano, «Esporta downloader» supporta solo la piattaforma «py». Il resto del plugin funziona normalmente.';
+            } else {
+                txt = '⚠️ Binari del downloader compilato non disponibili (' + miss + ' piattaforme mancanti su 7 — server senza internet?): «Esporta downloader» supporta solo «py». Per attivarli: copia la cartella bin/ a mano o configura settings.plugins.pkgmanagerBinariesUrl e riavvia MeshCentral.';
+            }
+            return '<div style="margin:0 0 10px 0;padding:8px 10px;border:1px solid #d5a012;background:#fff7e0;border-radius:6px;color:#7a5b00;font-size:13px">' + txt + '</div>';
+        } catch (e) { return ''; }
+    };
+
     obj.pkgSidebarRenderDevices = function () {
         try {
             var m = document.getElementById('pkgmanagerMain');
@@ -1219,7 +1243,7 @@ module.exports.pkgmanager = function (parent) {
             var devlist = [];
             try { for (var i in nodes) { if (nodes[i] && nodes[i]._id) devlist.push(nodes[i]); } } catch (e) { }
             if (window.pkgmanagerSelPkg == null) { window.pkgmanagerSelPkg = {}; } // v1.2.0: survives table re-renders
-            var x = '<div style="margin-bottom:8px;font-size:16px"><b>Installa/Elimina sui dispositivi</b></div>';
+            var x = '<div style="margin-bottom:8px;font-size:16px"><b>Installa/Elimina sui dispositivi</b></div>' + pluginHandler.pkgmanager.pkgBinBanner();
             x += '<div id="pkgmanagerSelSummary" style="margin-bottom:8px;color:#888"></div>';
             x += '<div style="display:flex;gap:16px;align-items:flex-start">';
             x += '<div style="flex:1 1 60%;min-width:0"><div style="margin-bottom:4px"><b>Pacchetti</b> <span id="pkgmanagerFilterNote" style="color:#888;font-weight:normal"></span> <span style="font-size:12px">[<a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(true);return false">tutti</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(false);return false">nessuno</a>]</span></div>';
@@ -1381,6 +1405,9 @@ module.exports.pkgmanager = function (parent) {
         try {
             window.pkgmanagerCatalog = message.catalog;
             window.pkgmanagerToken = message.token;
+            window.pkgmanagerBinMissing = message.binMissing;
+            window.pkgmanagerBinBusy = message.binBusy;
+            window.pkgmanagerBinAttempts = message.binAttempts;
             if (message.opAck != null) { window.pkgmanagerAdminMsg = message.opAck; }
             if (message.error != null) { window.pkgmanagerAdminMsg = message.error; pluginHandler.pkgmanager.pkgMsg(message.error); } // v1.8.0: gli errori del server (es. osfetch su server airgap) ora sono VISIBILI
             // v1.9.1 sticky view: dopo un bounce (go(0) ha salvato la vista)
@@ -1558,7 +1585,7 @@ module.exports.pkgmanager = function (parent) {
             var devlist = [];
             try { for (var j in nodes) { if (nodes[j] && nodes[j]._id) devlist.push(nodes[j]); } } catch (e) { }
             var osfAdm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
-            var x = '<div style="margin-bottom:8px;font-size:16px"><b>Aggiornamenti del sistema operativo</b> <span style="color:#888;font-weight:normal;font-size:12px">(airgap — bundle multi-file serviti da questo server in LAN)</span></div>';
+            var x = '<div style="margin-bottom:8px;font-size:16px"><b>Aggiornamenti del sistema operativo</b> <span style="color:#888;font-weight:normal;font-size:12px">(airgap — bundle multi-file serviti da questo server in LAN)</span></div>' + pluginHandler.pkgmanager.pkgBinBanner();
             x += '<div id="pkgmanagerSelSummary" style="margin-bottom:8px;color:#888"></div>';
             x += '<div style="display:flex;gap:16px;align-items:flex-start">';
             x += '<div style="flex:1 1 60%;min-width:0"><div style="margin-bottom:4px"><b>Bundle di aggiornamento OS</b> <span id="pkgmanagerFilterNote" style="color:#888;font-weight:normal"></span> <span style="font-size:12px">[<a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(true);return false">tutti</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgPkgSelectAll(false);return false">nessuno</a>]</span></div>';
@@ -2254,7 +2281,7 @@ module.exports.pkgmanager = function (parent) {
             // pluginHandler[message.plugin][message.method](server, message):
             // plugin and method must be at the TOP level, not nested in event.
             var send = function () {
-                try { session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgList', catalog: cat, token: obj.dlToken, opAck: opAck, error: (err2 ? String(err2) : (err || null)) }); } catch (e) { console.log('pkgmanager: reply failed: ' + e); }
+                try { session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgList', catalog: cat, token: obj.dlToken, opAck: opAck, error: (err2 ? String(err2) : (err || null)), binMissing: ((obj.binariesMissing != null) ? obj.binariesMissing().length : -1), binBusy: (obj.ensureBinariesBusy === true), binAttempts: (obj.ensureBinariesAttempts || 0) }); } catch (e) { console.log('pkgmanager: reply failed: ' + e); }
             };
             if ((cat == null) || (cat.packages == null)) { send(); return; }
             var oses = ['linux', 'windows', 'macos'];
