@@ -94,6 +94,15 @@
  *     activates on MeshCentral restart — automatic (process.exit after 3s)
  *     ONLY with settings.plugins.pkgmanagerAutoRestart === true (needs a
  *     service manager like systemd).
+ *     v1.9.8 AUTO-INSTALL OF THE DOWNLOADER BINARIES: the official plugin
+ *     package ships CODE ONLY (50KB) — the compiled per-OS downloader
+ *     binaries are an instance asset. 15s after startup the plugin checks
+ *     bin/ for all 7 platforms and, if any is missing, downloads the full
+ *     package from obj.binariesUrl (GitHub release asset of this fork,
+ *     overridable via settings.plugins.pkgmanagerBinariesUrl) and extracts
+ *     pkgmanager/bin/* with unzip (childProcess) + exec permissions, then
+ *     re-verifies. Up to 5 attempts, 15min between failures; airgap servers
+ *     just keep using py or copy bin/ manually.
  *     v1.9.0 COMPILED PER-PLATFORM DOWNLOADER: like the meshagents, the
  *     downloader ships COMPILED, one binary per OS — plugins/pkgmanager/
  *     bin/meshos-downloader-<platform> (win-x64, win-x86, linux-x64,
@@ -216,7 +225,7 @@ module.exports.pkgmanager = function (parent) {
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var vmMod = null; try { vmMod = require('vm'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.7';
+    obj.version = '1.9.8';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -226,6 +235,75 @@ module.exports.pkgmanager = function (parent) {
     obj.updateSrcUrl = 'https://raw.githubusercontent.com/hitclawagent/MeshCentral/feature/pkgmanager-plugin/plugins/pkgmanager/pkgmanager.js';
     try { var _pu = parent.parent.config.settings.plugins; if ((_pu != null) && (_pu.pkgmanagerUpdateUrl != null)) { obj.updateSrcUrl = String(_pu.pkgmanagerUpdateUrl); } } catch (e) { }
     obj.updatePendingPath = parent.path.join(parent.path.dirname(obj.catalogPath), '.update-pending.js');
+
+    // v1.9.8: AUTO-INSTALL DEI BINARI del downloader in background. Il
+    // pacchetto ufficiale del plugin contiene SOLO il codice: i binari
+    // compilati per-OS sono un asset dell'istanza. Se mancano, 15s dopo
+    // l'avvio il plugin scarica lo zip completo dalla release e estrae
+    // pkgmanager/bin/* con unzip (niente toolchain Go sul target).
+    obj.downloaderPlatforms = ['linux-x64', 'linux-arm64', 'linux-arm', 'win-x64', 'win-x86', 'macos-x64', 'macos-arm64'];
+    obj.binariesUrl = 'https://github.com/hitclawagent/MeshCentral/releases/download/v1.9.8/pkgmanager-full-1.9.8.zip';
+    try { var _pbin = parent.parent.config.settings.plugins; if ((_pbin != null) && (_pbin.pkgmanagerBinariesUrl != null)) { obj.binariesUrl = String(_pbin.pkgmanagerBinariesUrl); } } catch (e) { }
+    obj.binDir = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'bin');
+    obj.binariesMissing = function () {
+        var miss = [];
+        for (var i in obj.downloaderPlatforms) {
+            var plat = obj.downloaderPlatforms[i];
+            var f = parent.path.join(obj.binDir, 'meshos-downloader-' + plat + ((plat.indexOf('win') === 0) ? '.exe' : ''));
+            try { if (parent.fs.statSync(f).size < 1000000) { miss.push(plat); } } catch (e) { miss.push(plat); }
+        }
+        return miss;
+    };
+    obj.ensureBinariesBusy = false;
+    obj.ensureBinariesAttempts = 0;
+    obj.ensureBinaries = function () {
+        try {
+            if (obj.ensureBinariesBusy) return;
+            var miss = obj.binariesMissing();
+            if (miss.length == 0) { if (obj.ensureBinariesAttempts == 0) { console.log('pkgmanager[server]: binari del downloader presenti (' + obj.downloaderPlatforms.length + '/' + obj.downloaderPlatforms.length + ' piattaforme).'); } return; }
+            if (obj.ensureBinariesAttempts >= 5) { console.log('pkgmanager[server]: ensureBinaries rinuncia dopo 5 tentativi (url: ' + obj.binariesUrl + ') — airgap: copia bin/ a mano o usa py.'); return; }
+            obj.ensureBinariesBusy = true;
+            obj.ensureBinariesAttempts++;
+            console.log('pkgmanager[server]: ensureBinaries -> mancano ' + miss.length + '/7 binari (' + miss.join(', ') + '), scarico da ' + obj.binariesUrl + ' (tentativo ' + obj.ensureBinariesAttempts + ')...');
+            var tmpZip = parent.path.join(parent.path.dirname(obj.catalogPath), '.binaries-pending.zip');
+            Promise.resolve().then(function () { return fetch(obj.binariesUrl); }).then(function (r) {
+                if (!r.ok) { throw new Error('HTTP ' + r.status); }
+                return r.arrayBuffer();
+            }).then(function (ab) {
+                var buf = Buffer.from(ab);
+                parent.fs.writeFileSync(tmpZip, buf);
+                console.log('pkgmanager[server]: ensureBinaries -> scaricato ' + Math.round(buf.length / 1048576) + 'MB, estrazione...');
+                if (childProcess == null) { throw new Error('child_process non disponibile'); }
+                var tmpDir = parent.path.join(parent.path.dirname(obj.catalogPath), '.binaries-extract');
+                childProcess.exec('rm -rf "' + tmpDir + '" && mkdir -p "' + tmpDir + '" && unzip -o "' + tmpZip + '" -d "' + tmpDir + '"', function (eU) {
+                    if (eU != null) { obj.ensureBinariesBusy = false; console.log('pkgmanager[server]: ensureBinaries errore unzip: ' + eU); return; }
+                    try {
+                        var srcBin = parent.path.join(tmpDir, 'pkgmanager', 'bin');
+                        parent.fs.mkdirSync(obj.binDir, { recursive: true });
+                        var names = parent.fs.readdirSync(srcBin);
+                        for (var i in names) {
+                            var from = parent.path.join(srcBin, names[i]);
+                            var to = parent.path.join(obj.binDir, names[i]);
+                            try { parent.fs.unlinkSync(to); } catch (e6) { }
+                            parent.fs.renameSync(from, to);
+                            try { parent.fs.chmodSync(to, 0o755); } catch (e7) { }
+                        }
+                        try { parent.fs.unlinkSync(tmpZip); } catch (e8) { }
+                        try { parent.fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e9) { }
+                        obj.ensureBinariesBusy = false;
+                        var left = obj.binariesMissing();
+                        console.log('pkgmanager[server]: ensureBinaries -> estratti ' + names.length + ' binari; mancanti ora: ' + left.length + ((left.length > 0) ? (' (' + left.join(', ') + ')') : ''));
+                        if (left.length > 0) { setTimeout(function () { try { obj.ensureBinaries(); } catch (e10) { } }, 60000); }
+                    } catch (e11) { obj.ensureBinariesBusy = false; console.log('pkgmanager[server]: ensureBinaries errore installazione: ' + e11); }
+                });
+            }).catch(function (err) {
+                obj.ensureBinariesBusy = false;
+                console.log('pkgmanager[server]: ensureBinaries fallito (' + err + ') — riprovo tra 15 minuti.');
+                setTimeout(function () { try { obj.ensureBinaries(); } catch (e12) { } }, 15 * 60 * 1000);
+            });
+        } catch (e) { obj.ensureBinariesBusy = false; console.log('pkgmanager[server]: ensureBinaries errore: ' + e); }
+    };
+    setTimeout(function () { try { obj.ensureBinaries(); } catch (e) { console.log('pkgmanager[server]: ensureBinaries errore: ' + e); } }, 15000);
 
     // ---- Client-side (stringified into the browser) ----
     obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgDevOsFilter', 'pkgDevListRender', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgOsExportGo', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgAdminOsFilter', 'pkgUpdateOnline', 'pkgUpdateFile', 'pkgUpdateUpload', 'pkgUpdateInfo', 'pkgUpdateApplied', 'pkgDenied'];
@@ -2458,7 +2536,7 @@ log('prossimo passo: copia ' + OUT_DIR + '/ nello store del server (My Files -> 
             var binPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'bin', 'meshos-downloader-' + platform + ((platform.indexOf('win') === 0) ? '.exe' : ''));
             parent.fs.readFile(binPath, function (err, data) {
                 try {
-                    if ((err != null) || (data == null)) { obj.replyCatalog(session, null, 'Binario del downloader non trovato per ' + platform + ' (plugins/pkgmanager/bin/): ' + err + ' — il plugin non include i binari compilati: costruiscili dal sorgente Go (tools/meshos-downloader/, go build) o usa la piattaforma «py» (script Python standalone).'); return; }
+                    if ((err != null) || (data == null)) { obj.replyCatalog(session, null, 'Binario del downloader non ancora disponibile per ' + platform + ' (plugins/pkgmanager/bin/): il plugin lo scarica da solo in background dal canale di aggiornamento (log del server per i dettagli). Nel frattempo usa la piattaforma «py» (script Python standalone) o copia bin/ a mano.'); return; }
                     var mstart = '__MESHOS_INVENTORY_START__';
                     var mend = '__MESHOS_INVENTORY_END__';
                     // The marker STRINGS also live in the binary as .rodata
