@@ -67,6 +67,15 @@
  *     circuits on its own (xxcurrentView != -1). User navigation (event)
  *     tears down as before, restoring xxcurrentView = -1 first so the same
  *     core body really shows the requested panel (no blank main area).
+ *     v1.9.4 OS FILTER ON «GESTIONE PACCHETTI»: dropdown above the target-
+ *     machines list (Tutti/Linux/Windows/macOS, remembered in
+ *     window.pkgmanagerOsFilterVal — NOT pkgmanagerOsFilter: elements with an
+ *     id become window properties, the id-global would shadow the state). pkgDevListRender() renders the device rows
+ *     with data-os and hides non-matching ones (count shown); pkgDevOsFilter()
+ *     re-renders ONLY that list. pkgDevSelectAll() respects the filter — but
+ *     only on the install view (the select exists there; the OS view keeps
+ *     unfiltered select-all). Checked machines survive filter changes: the
+ *     filter is visual, the selection is the install target.
  *     v1.9.0 COMPILED PER-PLATFORM DOWNLOADER: like the meshagents, the
  *     downloader ships COMPILED, one binary per OS — plugins/pkgmanager/
  *     bin/meshos-downloader-<platform> (win-x64, win-x86, linux-x64,
@@ -188,13 +197,13 @@ module.exports.pkgmanager = function (parent) {
     var zlib = require('zlib');
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.3';
+    obj.version = '1.9.4';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgOsExportGo', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgDevOsFilter', 'pkgDevListRender', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgOsExportGo', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -1089,28 +1098,89 @@ module.exports.pkgmanager = function (parent) {
             x += '<div style="margin-bottom:6px"><input type=button value="Installa selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'install\')"> <input type=button value="Elimina selezionati" title="Esegue il comando di disinstallazione sui dispositivi selezionati" onclick="pluginHandler.pkgmanager.pkgBatchRun(\'delete\')"> <span id="pkgmanagerPkgSummary" style="color:#888;font-weight:normal"></span></div><div id="pkgmanagerTableWrap"></div></div>';
             x += '<div style="flex:0 0 320px;border-left:1px solid #ddd;padding-left:12px">';
             x += '<div style="margin-bottom:4px"><b>Macchine di destinazione</b> — <span style="font-size:12px"><a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(true);return false">tutte</a> / <a href=# onclick="pluginHandler.pkgmanager.pkgDevSelectAll(false);return false">nessuna</a></span></div>';
-            x += '<div id="pkgmanagerDeviceList" style="max-height:420px;overflow-y:auto">';
-            if (devlist.length == 0) { x += '<div style="color:#888;padding:4px">Nessun dispositivo</div>'; }
-            for (var i = 0; i < devlist.length; i++) {
-                var n = devlist[i];
-                var on = ((n.conn & 1) != 0);
-                var os = pluginHandler.pkgmanager.pkgTargetOs(n);
-                x += '<label style="display:block;padding:4px 2px;border-bottom:1px solid #eee;' + (on ? 'cursor:pointer' : 'color:#999;cursor:not-allowed') + '">';
-                x += '<input type=checkbox class="pkgmanagerDevCb" value="' + EscapeHtml(n._id) + '"' + (on ? '' : ' disabled') + ' onchange="pluginHandler.pkgmanager.pkgDevToggle()"> ';
-                x += '<b>' + EscapeHtml(n.name) + '</b> <span style="color:#888">· ' + os + (on ? ' · online' : ' · offline') + '</span></label>';
-            }
-            x += '</div><div style="margin-top:6px;color:#888;font-size:12px">Le macchine offline non sono selezionabili.</div>';
+            // v1.9.4: filtro per sistema operativo (menu a discesa)
+            x += '<div style="margin-bottom:6px">Sistema operativo: <select id="pkgmanagerOsFilter" onchange="pluginHandler.pkgmanager.pkgDevOsFilter()" style="padding:3px 5px"><option value="all">Tutti</option><option value="linux">Linux</option><option value="windows">Windows</option><option value="macos">macOS</option></select> <span id="pkgmanagerDevCount" style="color:#888;font-size:12px"></span></div>';
+            x += '<div id="pkgmanagerDeviceList" style="max-height:420px;overflow-y:auto"></div>';
+            x += '<div style="margin-top:6px;color:#888;font-size:12px">Le macchine offline non sono selezionabili.</div>';
             x += '</div></div>';
             x += '<div id="pkgmanagerMsg" style="margin-top:10px;color:#888"></div>';
             m.innerHTML = x;
+            var fs = document.getElementById('pkgmanagerOsFilter');
+            if (fs != null) { fs.value = (window.pkgmanagerOsFilterVal == null) ? 'all' : String(window.pkgmanagerOsFilterVal); }
+            pluginHandler.pkgmanager.pkgDevListRender();
             pluginHandler.pkgmanager.pkgSidebarRender();
         } catch (e) { console.log('pkgmanager device render failed: ' + e); }
+    };
+
+    // v1.9.4: righe delle macchine di destinazione della vista INSTALLA,
+    // filtrate per sistema operativo (pkgmanagerOsFilterVal: all/linux/windows/macos).
+    // NOTA: lo stato NON si chiama pkgmanagerOsFilter perche' gli elementi con id
+    // diventano proprieta' di window (id-global): window.pkgmanagerOsFilter e'
+    // la select stessa, non una variabile.
+    // Il filtro e' VISUALE: le spunte sopravvivono ai cambi di filtro.
+    obj.pkgDevListRender = function () {
+        try {
+            var el = document.getElementById('pkgmanagerDeviceList');
+            if (el == null) return;
+            var s = document.getElementById('pkgmanagerOsFilter');
+            var f = (s != null) ? String(s.value) : ((window.pkgmanagerOsFilterVal == null) ? 'all' : String(window.pkgmanagerOsFilterVal));
+            var devlist = [];
+            try { for (var i in nodes) { if (nodes[i] && nodes[i]._id) devlist.push(nodes[i]); } } catch (e0) { }
+            var x = '';
+            var shown = 0;
+            for (var i2 = 0; i2 < devlist.length; i2++) {
+                var n = devlist[i2];
+                var on = ((n.conn & 1) != 0);
+                var os = pluginHandler.pkgmanager.pkgTargetOs(n);
+                var vis = ((f == 'all') || (f == os));
+                if (vis) { shown++; }
+                x += '<label data-os="' + os + '" style="display:' + (vis ? 'block' : 'none') + ';padding:4px 2px;border-bottom:1px solid #eee;' + (on ? 'cursor:pointer' : 'color:#999;cursor:not-allowed') + '">';
+                x += '<input type=checkbox class="pkgmanagerDevCb" data-os="' + os + '" value="' + EscapeHtml(n._id) + '"' + (on ? '' : ' disabled') + ' onchange="pluginHandler.pkgmanager.pkgDevToggle()"> ';
+                x += '<b>' + EscapeHtml(n.name) + '</b> <span style="color:#888">· ' + os + (on ? ' · online' : ' · offline') + '</span></label>';
+            }
+            if (devlist.length == 0) { x = '<div style="color:#888;padding:4px">Nessun dispositivo</div>'; }
+            el.innerHTML = x;
+            var cnt = document.getElementById('pkgmanagerDevCount');
+            if (cnt != null) { cnt.textContent = ((f == 'all') ? '' : ('mostrate ' + shown + ' di ' + devlist.length)); }
+        } catch (e) { console.log('pkgmanager dev list render failed: ' + e); }
+    };
+
+    // v1.9.4: cambio filtro OS dal menu a discesa (solo vista INSTALLA).
+    // NON ricostruisce la lista: alterna la visibilita' delle etichette esistenti
+    // (il ricostruire svuoterebbe le spunte — il filtro deve restare visuale).
+    obj.pkgDevOsFilter = function () {
+        try {
+            var s = document.getElementById('pkgmanagerOsFilter');
+            if (s == null) return;
+            window.pkgmanagerOsFilterVal = String(s.value);
+            var f = String(s.value);
+            var labels = document.querySelectorAll('#pkgmanagerDeviceList label');
+            var shown = 0, total = 0;
+            for (var i = 0; i < labels.length; i++) {
+                total++;
+                var os = labels[i].getAttribute('data-os');
+                var vis = ((f == 'all') || (f == os));
+                labels[i].style.display = vis ? 'block' : 'none';
+                if (vis) { shown++; }
+            }
+            var cnt = document.getElementById('pkgmanagerDevCount');
+            if (cnt != null) { cnt.textContent = ((f == 'all') ? '' : ('mostrate ' + shown + ' di ' + total)); }
+        } catch (e) { console.log('pkgmanager os filter failed: ' + e); }
     };
 
     obj.pkgDevToggle = function () { if (window.pkgmanagerView == 'os') { pluginHandler.pkgmanager.pkgOsTable(); } else { pluginHandler.pkgmanager.pkgSidebarRender(); } }; // v1.4.0: view-aware
 
     obj.pkgDevSelectAll = function (v) {
-        try { var cbs = document.querySelectorAll('.pkgmanagerDevCb'); for (var i = 0; i < cbs.length; i++) { if (!cbs[i].disabled) cbs[i].checked = v; } } catch (e) { }
+        try {
+            var s = document.getElementById('pkgmanagerOsFilter'); // v1.9.4: il filtro esiste solo nella vista INSTALLA
+            var f = (s != null) ? String(s.value) : 'all';
+            var cbs = document.querySelectorAll('.pkgmanagerDevCb');
+            for (var i = 0; i < cbs.length; i++) {
+                if (cbs[i].disabled) continue;
+                if ((f != 'all') && (cbs[i].getAttribute('data-os') != f)) continue; // "tutte/nessuna" rispetta il filtro OS
+                cbs[i].checked = v;
+            }
+        } catch (e) { }
         pluginHandler.pkgmanager.pkgSidebarRender();
     };
 
