@@ -76,6 +76,12 @@
  *     only on the install view (the select exists there; the OS view keeps
  *     unfiltered select-all). Checked machines survive filter changes: the
  *     filter is visual, the selection is the install target.
+ *     v1.9.5 OS FILTER ON «GESTIONE PACCHETTI» (the CATALOG view with the
+ *     Modifica/Elimina buttons): second dropdown (Tutti/Linux/Windows/macOS)
+ *     showing only packages that HAVE a definition for the chosen OS, with a
+ *     "mostrati X di Y" count. State in window.pkgmanagerAdminOsVal (select
+ *     id pkgmanagerAdminOsSel — again avoiding the id-global trap). The OS
+ *     bundles bar («Gestione aggiornamenti») stays unfiltered, as requested.
  *     v1.9.0 COMPILED PER-PLATFORM DOWNLOADER: like the meshagents, the
  *     downloader ships COMPILED, one binary per OS — plugins/pkgmanager/
  *     bin/meshos-downloader-<platform> (win-x64, win-x86, linux-x64,
@@ -197,13 +203,13 @@ module.exports.pkgmanager = function (parent) {
     var zlib = require('zlib');
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.4';
+    obj.version = '1.9.5';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgDevOsFilter', 'pkgDevListRender', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgOsExportGo', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgDevOsFilter', 'pkgDevListRender', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgOsExportGo', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgAdminOsFilter', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -793,14 +799,22 @@ module.exports.pkgmanager = function (parent) {
             if ((cat == null) || (cat.packages == null)) { m.innerHTML = '<div style="color:#888">Caricamento catalogo…</div>'; return; }
             var isOs = pluginHandler.pkgmanager.pkgIsOsView();
             var x = '<div style="margin-bottom:8px;font-size:16px"><b>' + (isOs ? 'Gestione aggiornamenti' : 'Gestione pacchetti') + '</b> — ' + (isOs ? 'bundle OS airgap' : 'catalogo e artefatti airgap') + '</div>';
+            // v1.9.5: filtro OS del catalogo (solo «Gestione pacchetti», non per i bundle OS)
+            if (!isOs) { x += '<div style="margin-bottom:8px">Sistema operativo: <select id="pkgmanagerAdminOsSel" onchange="pluginHandler.pkgmanager.pkgAdminOsFilter()" style="padding:3px 5px"><option value="all">Tutti</option><option value="linux">Linux</option><option value="windows">Windows</option><option value="macos">macOS</option></select> <span id="pkgmanagerAdminOsCount" style="color:#888;font-size:12px"></span></div>'; }
             x += '<div style="margin-bottom:8px">' + (isOs ? '' : '<input type=button value="Aggiungi pacchetto" onclick="pluginHandler.pkgmanager.pkgAdminAdd()"> ') + '<input type=button value="Ricarica catalogo" onclick="pluginHandler.pkgmanager.pkgAdminRefresh()"> ' + (isOs ? '<input type=button value="Importa manifest…" title="Importa un manifest.json generato da meshos-fetch (i file devono essere gia stati copiati nello store del server)" onclick="pluginHandler.pkgmanager.pkgOsImportManifest()">' : '') + '</div>';
             if ((window.pkgmanagerAdminMsg != null) && (window.pkgmanagerAdminMsg != '')) { x += '<div style="margin-bottom:8px;color:#080">' + EscapeHtml(window.pkgmanagerAdminMsg) + '</div>'; }
             x += '<table style="border-collapse:collapse;width:100%">';
             x += '<tr style="text-align:left;border-bottom:1px solid #ccc"><th style="padding:4px">Pacchetto</th><th style="padding:4px">Definizioni OS / artefatto</th><th style="padding:4px">Azioni</th></tr>';
             var oses = ['linux', 'windows', 'macos'];
+            // v1.9.5: filtro OS (stato, non DOM: al primo render la select non esiste ancora)
+            var af = (isOs || (window.pkgmanagerAdminOsVal == null)) ? 'all' : String(window.pkgmanagerAdminOsVal);
+            var aShown = 0, aTotal = 0;
             for (var i = 0; i < cat.packages.length; i++) {
                 var p = cat.packages[i];
                 if (isOs !== (pluginHandler.pkgmanager.pkgOsKind(p) == 'os')) continue; // v1.5.0: per-bar filtering
+                aTotal++;
+                if ((af != 'all') && (p[af] == null)) continue; // v1.9.5: solo pacchetti con definizione per l'OS scelto
+                aShown++;
                 var defs = '';
                 for (var k = 0; k < oses.length; k++) {
                     var def = p[oses[k]];
@@ -819,7 +833,21 @@ module.exports.pkgmanager = function (parent) {
             x += '</table>';
             x += '<div style="margin-top:8px;color:#888">Artefatti: cartella server plugins/pkgmanager/store/&lt;pacchetto&gt;/&lt;file&gt;. "Carica artefatto" li inserisce da questa pagina (serve amministratore del server).</div>';
             m.innerHTML = x;
+            var asel = document.getElementById('pkgmanagerAdminOsSel');
+            if (asel != null) { asel.value = (window.pkgmanagerAdminOsVal == null) ? 'all' : String(window.pkgmanagerAdminOsVal); }
+            var acnt = document.getElementById('pkgmanagerAdminOsCount');
+            if (acnt != null) { acnt.textContent = ((af == 'all') ? '' : ('mostrati ' + aShown + ' di ' + aTotal + ' pacchetti')); }
         } catch (e) { console.log('pkgmanager admin render failed: ' + e); }
+    };
+
+    // v1.9.5: cambio filtro OS del catalogo (solo «Gestione pacchetti»)
+    obj.pkgAdminOsFilter = function () {
+        try {
+            var s = document.getElementById('pkgmanagerAdminOsSel');
+            if (s == null) return;
+            window.pkgmanagerAdminOsVal = String(s.value);
+            pluginHandler.pkgmanager.pkgAdminRender();
+        } catch (e) { console.log('pkgmanager admin os filter failed: ' + e); }
     };
 
     obj.pkgAdminAdd = function () { pluginHandler.pkgmanager.pkgAdminForm(null); };
