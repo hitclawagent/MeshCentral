@@ -82,6 +82,18 @@
  *     "mostrati X di Y" count. State in window.pkgmanagerAdminOsVal (select
  *     id pkgmanagerAdminOsSel — again avoiding the id-global trap). The OS
  *     bundles bar («Gestione aggiornamenti») stays unfiltered, as requested.
+ *     v1.9.6 PLUGIN SELF-UPDATE (the last manual step, now automated): two
+ *     admin buttons in «Gestione pacchetti». ONLINE: the SERVER fetches
+ *     pkgmanager.js from obj.updateSrcUrl (raw GitHub of this fork,
+ *     overridable via settings.plugins.pkgmanagerUpdateUrl), compares
+ *     versions, hashes sha384, and installs. AIRGAP: «Aggiorna plugin
+ *     (file)» POSTs the picked .js to /pkgstore.ashx?op=plugupd ->
+ *     .update-pending.js, then the server verifies (vm syntax check, version
+ *     >= running, sha384) and installs. Both paths: backup to
+ *     pkgmanager.js.bak-<version> before overwrite; the new version
+ *     activates on MeshCentral restart — automatic (process.exit after 3s)
+ *     ONLY with settings.plugins.pkgmanagerAutoRestart === true (needs a
+ *     service manager like systemd).
  *     v1.9.0 COMPILED PER-PLATFORM DOWNLOADER: like the meshagents, the
  *     downloader ships COMPILED, one binary per OS — plugins/pkgmanager/
  *     bin/meshos-downloader-<platform> (win-x64, win-x86, linux-x64,
@@ -202,14 +214,21 @@ module.exports.pkgmanager = function (parent) {
     var crypto = require('crypto');
     var zlib = require('zlib');
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
+    var vmMod = null; try { vmMod = require('vm'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.5';
+    obj.version = '1.9.6';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
+    // v1.9.6: sorgente di aggiornamento del plugin (online); sovrascrivibile
+    // da settings.plugins.pkgmanagerUpdateUrl. Il file caricato via airgap
+    // atterra su .update-pending.js nella stessa cartella.
+    obj.updateSrcUrl = 'https://raw.githubusercontent.com/hitclawagent/MeshCentral/feature/pkgmanager-plugin/plugins/pkgmanager/pkgmanager.js';
+    try { var _pu = parent.parent.config.settings.plugins; if ((_pu != null) && (_pu.pkgmanagerUpdateUrl != null)) { obj.updateSrcUrl = String(_pu.pkgmanagerUpdateUrl); } } catch (e) { }
+    obj.updatePendingPath = parent.path.join(parent.path.dirname(obj.catalogPath), '.update-pending.js');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgDevOsFilter', 'pkgDevListRender', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgOsExportGo', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgAdminOsFilter', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgDevOsFilter', 'pkgDevListRender', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgOsExportGo', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgAdminOsFilter', 'pkgUpdateOnline', 'pkgUpdateFile', 'pkgUpdateUpload', 'pkgUpdateInfo', 'pkgUpdateApplied', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -801,7 +820,9 @@ module.exports.pkgmanager = function (parent) {
             var x = '<div style="margin-bottom:8px;font-size:16px"><b>' + (isOs ? 'Gestione aggiornamenti' : 'Gestione pacchetti') + '</b> — ' + (isOs ? 'bundle OS airgap' : 'catalogo e artefatti airgap') + '</div>';
             // v1.9.5: filtro OS del catalogo (solo «Gestione pacchetti», non per i bundle OS)
             if (!isOs) { x += '<div style="margin-bottom:8px">Sistema operativo: <select id="pkgmanagerAdminOsSel" onchange="pluginHandler.pkgmanager.pkgAdminOsFilter()" style="padding:3px 5px"><option value="all">Tutti</option><option value="linux">Linux</option><option value="windows">Windows</option><option value="macos">macOS</option></select> <span id="pkgmanagerAdminOsCount" style="color:#888;font-size:12px"></span></div>'; }
-            x += '<div style="margin-bottom:8px">' + (isOs ? '' : '<input type=button value="Aggiungi pacchetto" onclick="pluginHandler.pkgmanager.pkgAdminAdd()"> ') + '<input type=button value="Ricarica catalogo" onclick="pluginHandler.pkgmanager.pkgAdminRefresh()"> ' + (isOs ? '<input type=button value="Importa manifest…" title="Importa un manifest.json generato da meshos-fetch (i file devono essere gia stati copiati nello store del server)" onclick="pluginHandler.pkgmanager.pkgOsImportManifest()">' : '') + '</div>';
+            var updAdm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
+            var updBtns = (updAdm ? '<input type=button value="Aggiorna plugin (online)" title="Il SERVER scarica la nuova versione del plugin dal sorgente configurato, la verifica (sha384) e la installa con backup: serve il riavvio di MeshCentral per attivarla" onclick="pluginHandler.pkgmanager.pkgUpdateOnline()"> <input type=button value="Aggiorna plugin (file)" title="VIA AIRGAP: carica il pkgmanager.js nuovo da un file locale; il server lo verifica (JavaScript valido, versione, sha384), fa il backup e lo installa — serve il riavvio di MeshCentral per attivarla" onclick="pluginHandler.pkgmanager.pkgUpdateFile()"> ' : '');
+            x += '<div style="margin-bottom:8px">' + (isOs ? '' : '<input type=button value="Aggiungi pacchetto" onclick="pluginHandler.pkgmanager.pkgAdminAdd()"> ') + '<input type=button value="Ricarica catalogo" onclick="pluginHandler.pkgmanager.pkgAdminRefresh()"> ' + (isOs ? '<input type=button value="Importa manifest…" title="Importa un manifest.json generato da meshos-fetch (i file devono essere gia stati copiati nello store del server)" onclick="pluginHandler.pkgmanager.pkgOsImportManifest()">' : '') + updBtns + '</div>';
             if ((window.pkgmanagerAdminMsg != null) && (window.pkgmanagerAdminMsg != '')) { x += '<div style="margin-bottom:8px;color:#080">' + EscapeHtml(window.pkgmanagerAdminMsg) + '</div>'; }
             x += '<table style="border-collapse:collapse;width:100%">';
             x += '<tr style="text-align:left;border-bottom:1px solid #ccc"><th style="padding:4px">Pacchetto</th><th style="padding:4px">Definizioni OS / artefatto</th><th style="padding:4px">Azioni</th></tr>';
@@ -832,6 +853,7 @@ module.exports.pkgmanager = function (parent) {
             }
             x += '</table>';
             x += '<div style="margin-top:8px;color:#888">Artefatti: cartella server plugins/pkgmanager/store/&lt;pacchetto&gt;/&lt;file&gt;. "Carica artefatto" li inserisce da questa pagina (serve amministratore del server).</div>';
+            x += '<div id="pkgmanagerMsg" style="margin-top:10px;color:#080"></div>';
             m.innerHTML = x;
             var asel = document.getElementById('pkgmanagerAdminOsSel');
             if (asel != null) { asel.value = (window.pkgmanagerAdminOsVal == null) ? 'all' : String(window.pkgmanagerAdminOsVal); }
@@ -1324,6 +1346,48 @@ module.exports.pkgmanager = function (parent) {
     };
 
     // Server-side rejection of management ops from non-admins.
+    // v1.9.6: auto-aggiornamento del plugin (solo full admin)
+    obj.pkgUpdateOnline = function () {
+        try { pluginHandler.pkgmanager.pkgMsg('Controllo aggiornamento plugin dal sorgente remoto…'); meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'pluginupdate-check' }); } catch (e) { pluginHandler.pkgmanager.pkgMsg('Aggiornamento plugin fallito: ' + e); }
+    };
+    obj.pkgUpdateFile = function () {
+        try {
+            var inp = document.getElementById('pkgUpdateFileInput');
+            if (inp == null) {
+                inp = document.createElement('input'); inp.type = 'file'; inp.id = 'pkgUpdateFileInput'; inp.style.display = 'none'; inp.accept = '.js,application/javascript,text/javascript'; document.body.appendChild(inp);
+                inp.addEventListener('change', function () { pluginHandler.pkgmanager.pkgUpdateUpload(); });
+            }
+            inp.value = ''; inp.click();
+        } catch (e) { pluginHandler.pkgmanager.pkgMsg('Aggiornamento plugin fallito: ' + e); }
+    };
+    obj.pkgUpdateUpload = function () {
+        try {
+            var inp = document.getElementById('pkgUpdateFileInput');
+            var f = ((inp != null) && (inp.files != null)) ? inp.files[0] : null;
+            if (f == null) { pluginHandler.pkgmanager.pkgMsg('Nessun file selezionato.'); return; }
+            inp.value = '';
+            pluginHandler.pkgmanager.pkgMsg('Caricamento del file di aggiornamento (' + Math.round(f.size / 1024) + 'KB)…');
+            f.arrayBuffer().then(function (buf) {
+                return fetch('/pkgstore.ashx?op=plugupd', { method: 'POST', body: buf, headers: { 'Content-Type': 'application/octet-stream' } });
+            }).then(function (r) { return r.json(); }).then(function (j) {
+                if (!j.ok) { pluginHandler.pkgmanager.pkgMsg('Caricamento fallito: ' + j.error); return; }
+                pluginHandler.pkgmanager.pkgMsg('File caricato (sha384 ' + String(j.sha384).slice(0, 16) + '...) — verifica e installazione…');
+                meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'pluginupdate-airgap-apply' });
+            }).catch(function (err) { pluginHandler.pkgmanager.pkgMsg('Caricamento fallito: ' + err); });
+        } catch (e) { pluginHandler.pkgmanager.pkgMsg('Aggiornamento plugin fallito: ' + e); }
+    };
+    obj.pkgUpdateInfo = function (server, message) {
+        try {
+            if (message.newer === true) {
+                pluginHandler.pkgmanager.pkgMsg('Aggiornamento plugin disponibile: v' + message.latest + ' (corrente v' + message.current + ', sha384 ' + String(message.sha384).slice(0, 16) + '...) — installazione…');
+                meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'pluginupdate-apply', sha: message.sha384 });
+            } else { pluginHandler.pkgmanager.pkgMsg('Plugin gia aggiornato (v' + message.current + '). Nessun aggiornamento dal sorgente remoto.'); }
+        } catch (e) { }
+    };
+    obj.pkgUpdateApplied = function (server, message) {
+        try { pluginHandler.pkgmanager.pkgMsg(message.msg || 'Plugin aggiornato.'); } catch (e) { }
+    };
+
     obj.pkgDenied = function (server, message) {
         try {
             window.pkgmanagerAdminMsg = ((message != null) && (message.msg != null)) ? message.msg : 'Operazione negata.';
@@ -2011,6 +2075,21 @@ module.exports.pkgmanager = function (parent) {
             if ((wu == null) || (wu.siteadmin !== 0xFFFFFFFF)) { res.status(403).json({ ok: false, error: 'Solo gli amministratori del server possono gestire gli artefatti.' }); return; }
             var p = String(req.query.p || '');
             var op = String(req.query.op || '');
+            if (op == 'plugupd') {
+                // v1.9.6: file di aggiornamento del plugin -> .update-pending.js
+                // (path FISSO, nessun parametro di percorso: zero traversal).
+                // PRIMA della validazione del percorso: questa opzione non usa `p`.
+                // NB: le dichiarazioni p/op stanno SOPRA il ramo (var hoisting: se
+                // il ramo le precedesse, op sarebbe undefined e il ramo morto).
+                if (!(Buffer.isBuffer(req.body)) || (req.body.length == 0)) { res.status(400).json({ ok: false, error: 'Corpo vuoto.' }); return; }
+                parent.fs.writeFile(obj.updatePendingPath, req.body, function (e4) {
+                    if (e4 != null) { try { res.status(500).json({ ok: false, error: String(e4) }); } catch (e5) { } return; }
+                    var hu = crypto.createHash('sha384').update(req.body).digest('hex');
+                    console.log('pkgmanager[server]: plugin update uploaded (' + req.body.length + ' bytes, sha384=' + hu.slice(0, 16) + '...) by ' + wu._id);
+                    try { res.json({ ok: true, sha384: hu, size: req.body.length }); } catch (e5) { }
+                });
+                return;
+            }
             var full = parent.path.join(obj.storePath, p);
             if ((full.indexOf(obj.storePath) !== 0) || (full == obj.storePath) || (p.indexOf('..') >= 0)) { res.status(400).json({ ok: false, error: 'Percorso non valido.' }); return; }
             if (op == 'del') {
@@ -2409,12 +2488,83 @@ log('prossimo passo: copia ' + OUT_DIR + '/ nello store del server (My Files -> 
         } catch (e) { obj.replyCatalog(session, null, 'Patch binario fallita: ' + e); }
     };
 
+    // v1.9.6: helpers auto-aggiornamento plugin
+    obj.cmpSemver = function (a, b) {
+        try {
+            var pa = String(a).split('.'), pb = String(b).split('.');
+            for (var i = 0; i < 3; i++) { var x = parseInt(pa[i] || '0', 10) || 0, y = parseInt(pb[i] || '0', 10) || 0; if (x != y) return (x > y) ? 1 : -1; }
+            return 0;
+        } catch (e) { return 0; }
+    };
+    obj.pluginVersionFromCode = function (code) { var m = /obj\.version = '([0-9]+\.[0-9]+\.[0-9]+)'/.exec(String(code)); return m ? m[1] : null; };
+    // Verifica + backup + scrittura. Il NUOVO codice NON viene eseguito qui:
+    // si attiva al riavvio di MeshCentral (o con pkgmanagerAutoRestart).
+    obj.pluginInstallUpdate = function (code, knownVersion, session) {
+        try {
+            if (vmMod == null) { obj.replyCatalog(session, null, 'Aggiornamento plugin: modulo vm non disponibile.'); return; }
+            try { new vmMod.Script(String(code)); } catch (se) { obj.replyCatalog(session, null, 'Aggiornamento plugin RIFIUTATO: JavaScript non valido nel file (' + se + ').'); return; }
+            var v = obj.pluginVersionFromCode(code);
+            if (v == null) { obj.replyCatalog(session, null, 'Aggiornamento plugin RIFIUTATO: versione non leggibile nel file.'); return; }
+            if (obj.cmpSemver(v, obj.version) < 0) { obj.replyCatalog(session, null, 'Aggiornamento plugin RIFIUTATO: la versione ' + v + ' e piu vecchia della corrente ' + obj.version + '.'); return; }
+            var sha = crypto.createHash('sha384').update(String(code)).digest('hex');
+            var selfPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'pkgmanager.js');
+            var bakPath = selfPath + '.bak-' + obj.version;
+            try { parent.fs.copyFileSync(selfPath, bakPath); } catch (e1) { obj.replyCatalog(session, null, 'Aggiornamento plugin: backup fallito (' + e1 + ') — niente sovrascrittura.'); return; }
+            parent.fs.writeFileSync(selfPath, String(code));
+            try { if (parent.fs.existsSync(obj.updatePendingPath)) { parent.fs.unlinkSync(obj.updatePendingPath); } } catch (e2) { }
+            obj._pendingUpdate = null;
+            console.log('pkgmanager[server]: plugin updated ' + obj.version + ' -> ' + v + ' (backup: ' + parent.path.basename(bakPath) + ', sha384=' + sha.slice(0, 16) + '...)');
+            var auto = false;
+            try { var _pc = parent.parent.config.settings.plugins; auto = ((_pc != null) && (_pc.pkgmanagerAutoRestart === true)); } catch (e3) { }
+            var msg = 'Plugin aggiornato a v' + v + ' (backup: pkgmanager.js.bak-' + obj.version + ', sha384 ' + sha.slice(0, 16) + '...). RIAVVIA MeshCentral per attivare la nuova versione.';
+            if (auto) { msg += ' Riavvio automatico tra 3 secondi (pkgmanagerAutoRestart).'; setTimeout(function () { console.log('pkgmanager[server]: auto-restart per attivare la v' + v); process.exit(0); }, 3000); }
+            session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgUpdateApplied', version: v, backup: parent.path.basename(bakPath), auto: auto, msg: msg });
+        } catch (e) { obj.replyCatalog(session, null, 'Aggiornamento plugin fallito: ' + e); }
+    };
+
     obj.serveraction = function (command, session, parent2) {
         console.log('pkgmanager[server]: serveraction ' + command.pluginaction + ' from user ' + command.userid);
         var isAdmin = ((session != null) && (session.user != null) && (session.user.siteadmin === 0xFFFFFFFF));
         function deny() { try { session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgDenied', msg: 'Operazioni di gestione riservate agli amministratori del server.' }); } catch (e) { } }
 
         if (command.pluginaction == 'list') { obj.replyCatalog(session, null, null); return; }
+
+        // v1.9.6: AUTO-AGGIORNAMENTO DEL PLUGIN — online e airgap
+        if (command.pluginaction == 'pluginupdate-check') {
+            if (!isAdmin) { console.log('pkgmanager[server]: denied pluginupdate-check for user ' + command.userid); deny(); return; }
+            (function () {
+                var f = null; try { f = fetch(obj.updateSrcUrl); } catch (e) { }
+                if (f == null) { obj.replyCatalog(session, null, 'Aggiornamento plugin: fetch non disponibile su questo Node.'); return; }
+                f.then(function (r) { return r.text(); }).then(function (code) {
+                    var v = obj.pluginVersionFromCode(code);
+                    if (v == null) { obj.replyCatalog(session, null, 'Aggiornamento plugin: la risposta del sorgente non contiene una versione valida.'); return; }
+                    var sha = crypto.createHash('sha384').update(code).digest('hex');
+                    var cmp = obj.cmpSemver(v, obj.version);
+                    obj._pendingUpdate = ((cmp > 0) ? { code: code, sha: sha, version: v } : null);
+                    console.log('pkgmanager[server]: pluginupdate-check -> corrente ' + obj.version + ', remota ' + v + ' (' + ((cmp > 0) ? 'aggiornamento disponibile' : 'gia aggiornato') + ')');
+                    session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgUpdateInfo', current: obj.version, latest: v, newer: (cmp > 0), sha384: sha, url: obj.updateSrcUrl });
+                }).catch(function (err) {
+                    console.log('pkgmanager[server]: pluginupdate-check error: ' + err);
+                    obj.replyCatalog(session, null, 'Aggiornamento plugin online fallito: ' + err + ' — se il server e airgap usa «Aggiorna plugin (file)».');
+                });
+            })();
+            return;
+        }
+        if (command.pluginaction == 'pluginupdate-apply') {
+            if (!isAdmin) { console.log('pkgmanager[server]: denied pluginupdate-apply for user ' + command.userid); deny(); return; }
+            var pu = obj._pendingUpdate;
+            if ((pu == null) || (String(command.sha || '') !== pu.sha)) { obj.replyCatalog(session, null, 'Aggiornamento plugin: nessun download in sospeso o hash non corrispondente — rifai «Aggiorna plugin (online)».'); return; }
+            obj.pluginInstallUpdate(pu.code, pu.version, session);
+            return;
+        }
+        if (command.pluginaction == 'pluginupdate-airgap-apply') {
+            if (!isAdmin) { console.log('pkgmanager[server]: denied pluginupdate-airgap-apply for user ' + command.userid); deny(); return; }
+            obj.fs.readFile(obj.updatePendingPath, 'utf8', function (err2, code) {
+                if ((err2 != null) || (code == null) || (code == '')) { obj.replyCatalog(session, null, 'Aggiornamento plugin: nessun file caricato — usa «Aggiorna plugin (file)» e seleziona il pkgmanager.js nuovo.'); return; }
+                obj.pluginInstallUpdate(code, null, session);
+            });
+            return;
+        }
 
         // v1.7.0: «Scarica aggiornamenti» — INTEGRATED downloader. The SERVER
         // (this process) fetches the vendor indexes, computes the missing
