@@ -216,7 +216,7 @@ module.exports.pkgmanager = function (parent) {
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var vmMod = null; try { vmMod = require('vm'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.6';
+    obj.version = '1.9.7';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -2458,7 +2458,7 @@ log('prossimo passo: copia ' + OUT_DIR + '/ nello store del server (My Files -> 
             var binPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'bin', 'meshos-downloader-' + platform + ((platform.indexOf('win') === 0) ? '.exe' : ''));
             parent.fs.readFile(binPath, function (err, data) {
                 try {
-                    if ((err != null) || (data == null)) { obj.replyCatalog(session, null, 'Binario del downloader non trovato per ' + platform + ' (plugins/pkgmanager/bin/): ' + err); return; }
+                    if ((err != null) || (data == null)) { obj.replyCatalog(session, null, 'Binario del downloader non trovato per ' + platform + ' (plugins/pkgmanager/bin/): ' + err + ' — il plugin non include i binari compilati: costruiscili dal sorgente Go (tools/meshos-downloader/, go build) o usa la piattaforma «py» (script Python standalone).'); return; }
                     var mstart = '__MESHOS_INVENTORY_START__';
                     var mend = '__MESHOS_INVENTORY_END__';
                     // The marker STRINGS also live in the binary as .rodata
