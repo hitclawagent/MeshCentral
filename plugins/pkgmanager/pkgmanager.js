@@ -44,6 +44,18 @@
  *     on page 1 and no plugin view is active; the marker is consumed on
  *     read). A user-initiated navigation away (any other go(x)) never arms
  *     the marker — the sticky restore only ever follows a real disconnect.
+ *     v1.9.2 STAY-IN-VIEW + PLATFORM DROPDOWN: diagnosed LIVE (probe stack)
+ *     the scan bounce root cause: the core's mainUpdate() naggle timer ends
+ *     with gotoStartViewPage(), which fires go(1) whenever xxcurrentView ==
+ *     -1 — and the plugin views USE -1 as their convention, so every event
+ *     flood during a scan (or a WS re-landing) tears the plugin view down.
+ *     goPageStart now distinguishes user navigation (every real click passes
+ *     `event`) from SPONTANEOUS core navigation (event == null): the latter
+ *     is re-asserted right after the core's go() completes (setTimeout 0,
+ *     same view->open mapping as the sticky restore). go(0) still tears down
+ *     and arms the sticky marker (a reload may follow). «Esporta downloader…»
+ *     now shows an inline DROPDOWN (7 compiled platforms + py) instead of the
+ *     typed prompt; confirmation via pkgOsExportGo().
  *     v1.9.0 COMPILED PER-PLATFORM DOWNLOADER: like the meshagents, the
  *     downloader ships COMPILED, one binary per OS — plugins/pkgmanager/
  *     bin/meshos-downloader-<platform> (win-x64, win-x86, linux-x64,
@@ -165,13 +177,13 @@ module.exports.pkgmanager = function (parent) {
     var zlib = require('zlib');
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.1';
+    obj.version = '1.9.2';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgOsExportGo', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -317,9 +329,41 @@ module.exports.pkgmanager = function (parent) {
             // uccidendo la vista plugin aperta. Salvala ORA (un utente non
             // puo' mai sparare go(0) a mano) cosi' pkgList la riapre quando
             // il catalogo torna dopo il bounce.
-            if ((x === 0) && (window.pkgmanagerView != null)) {
-                try { sessionStorage.setItem('pkgmanagerStickyView', String(window.pkgmanagerView)); } catch (e2) { }
-                console.log('pkgmanager: sticky view armata per il bounce: ' + String(window.pkgmanagerView));
+            var curV = window.pkgmanagerView;
+            if ((x === 0) && (curV != null)) {
+                try { sessionStorage.setItem('pkgmanagerStickyView', String(curV)); } catch (e2) { }
+                console.log('pkgmanager: sticky view armata per il bounce: ' + String(curV));
+            }
+            // v1.9.2: un go() SENZA evento e' navigazione SPONTANEA del core
+            // (gotoStartViewPage dopo ogni flood di eventi — es. durante una
+            // scansione — o la riatterrata della websocket). gotoStartViewPage
+            // scatta proprio perche' le viste plugin usano xxcurrentView == -1,
+            // che per il core significa "nessuna vista": NON e' una scelta
+            // dell'utente (ogni click reale passa `event`), quindi non smontare
+            // la vista: lasciare completare il go() del core e riasserire
+            // subito la vista plugin (mapping identico allo sticky restore).
+            if ((event == null) && (x !== 0) && (curV != null)) {
+                setTimeout(function () {
+                    try {
+                        if (String(window.pkgmanagerView) !== String(curV)) return; // una navigazione vera e' intervenuta
+                        // gia' ripristinata da un reassert precedente (o go no-op): non rifare nulla
+                        if ((typeof xxcurrentView === 'number') && (xxcurrentView === -1)) return;
+                        // REASSERT MINIMO: il contenuto del wrap non e' mai stato
+                        // toccato (il teardown lo nasconde solo) — niente render
+                        // niente richiesta catalogo (la risposta ri-scatenerebbe
+                        // gotoStartViewPage: ping-pong ~6 go/s). Solo: nascondi il
+                        // pannello core che go(x) ha appena mostrato, ri-mostra il
+                        // wrap, rimetti xxcurrentView = -1 e lo stato delle tab.
+                        var xv = (typeof xxcurrentView === 'number') ? xxcurrentView : 1;
+                        if ((xv >= 0) && (xv <= 60)) { try { QV('p' + xv, false); } catch (e4) { } }
+                        var w = document.getElementById('pkgmanagerMainWrap');
+                        if (w != null) w.style.display = '';
+                        xxcurrentView = -1;
+                        pluginHandler.pkgmanager.pkgTabSetActive(curV);
+                        console.log('pkgmanager: vista mantenuta su go(' + String(x) + ') spontaneo: ' + curV);
+                    } catch (e3) { }
+                }, 0);
+                return;
             }
             window.pkgmanagerView = null;
             pluginHandler.pkgmanager.pkgTabSetActive(null, ((typeof x == 'number') && (x >= 9) && (x < 20)));
@@ -1483,15 +1527,50 @@ module.exports.pkgmanager = function (parent) {
                 if (np.indexOf('win') >= 0) { guess = 'win-x64'; }
                 else if (np.indexOf('mac') >= 0) { guess = ((np.indexOf('arm64') >= 0) ? 'macos-arm64' : 'macos-x64'); }
             } catch (e2) { }
-            var xplat = prompt('Piattaforma del downloader COMPILATO (il sistema della macchina con internet che lo eseguira\'):\nwin-x64 · win-x86 · linux-x64 · linux-arm64 · linux-arm · macos-x64 · macos-arm64\noppure "py" per lo script Python standalone:', guess);
-            if ((xplat == null) || (String(xplat).trim() == '')) { pluginHandler.pkgmanager.pkgMsg('Esportazione annullata.'); return; }
+            // v1.9.2: menu a discesa inline invece del prompt testuale
+            var bar = document.getElementById('pkgOsExportBar');
+            if (bar == null) {
+                bar = document.createElement('div');
+                bar.id = 'pkgOsExportBar';
+                bar.style.cssText = 'margin:8px 0;padding:10px;border:1px solid #bbb;border-radius:6px;background:#f9f9f9;display:none';
+                var sum = document.getElementById('pkgmanagerPkgSummary');
+                var tw = document.getElementById('pkgmanagerTableWrap');
+                if ((sum != null) && (sum.parentNode != null) && (sum.parentNode.parentNode != null)) { sum.parentNode.parentNode.insertBefore(bar, sum.parentNode.nextSibling); }
+                else if (tw != null) { tw.parentNode.insertBefore(bar, tw); }
+                else { bar.style.cssText += ';position:fixed;top:60px;left:40%;z-index:1000'; document.body.appendChild(bar); }
+                bar.innerHTML = '<span style="font-weight:bold">Piattaforma del downloader compilato:</span> <select id="pkgOsExportSel" style="padding:3px 5px">' +
+                    '<option value="linux-x64">Linux 64 bit (linux-x64)</option>' +
+                    '<option value="linux-arm64">Linux ARM64 (linux-arm64)</option>' +
+                    '<option value="linux-arm">Linux ARM (linux-arm)</option>' +
+                    '<option value="win-x64">Windows 64 bit (win-x64)</option>' +
+                    '<option value="win-x86">Windows 32 bit (win-x86)</option>' +
+                    '<option value="macos-x64">macOS Intel (macos-x64)</option>' +
+                    '<option value="macos-arm64">macOS Apple Silicon (macos-arm64)</option>' +
+                    '<option value="py">Script Python standalone (py)</option>' +
+                    '</select> <input type=button value="Esporta" onclick="pluginHandler.pkgmanager.pkgOsExportGo()"> <input type=button value="Annulla" onclick="var b=document.getElementById(\'pkgOsExportBar\'); if(b!=null){b.style.display=\'none\';}">';
+            }
+            var sel = document.getElementById('pkgOsExportSel');
+            if (sel != null) { sel.value = guess; }
+            bar.style.display = '';
+        } catch (e) { pluginHandler.pkgmanager.pkgMsg('Esportazione fallita: ' + e); }
+    };
+
+    // v1.9.2: conferma del menu a discesa — costruisce e invia la richiesta
+    obj.pkgOsExportGo = function () {
+        try {
+            var sel = document.getElementById('pkgOsExportSel');
+            var xplat = (sel != null) ? String(sel.value) : '';
+            if (xplat.trim() == '') { pluginHandler.pkgmanager.pkgMsg('Seleziona una piattaforma.'); return; }
+            var bar = document.getElementById('pkgOsExportBar');
+            if (bar != null) { bar.style.display = 'none'; }
+            var run = window.pkgmanagerOsScan;
             var machines = [];
             for (var nid in run.machs) {
                 var m = run.machs[nid];
                 machines.push({ id: nid, name: m.name, os: m.os, osInfo: { name: ((m.info != null) && (m.info.length > 0)) ? m.info[0] : '', version: ((m.info != null) && (m.info.length > 1)) ? m.info[1] : '', codename: ((m.info != null) && (m.info.length > 2)) ? m.info[2] : '' }, items: m.items.slice(0) });
             }
-            meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'exportdownloader', platform: String(xplat).trim(), machines: machines });
-            pluginHandler.pkgmanager.pkgMsg('Generazione del downloader ' + String(xplat).trim() + ' in corso (inventario incorporato)…');
+            meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'exportdownloader', platform: xplat.trim(), machines: machines });
+            pluginHandler.pkgmanager.pkgMsg('Generazione del downloader ' + xplat.trim() + ' in corso (inventario incorporato)…');
         } catch (e) { pluginHandler.pkgmanager.pkgMsg('Esportazione fallita: ' + e); }
     };
 
