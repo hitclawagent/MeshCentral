@@ -56,6 +56,17 @@
  *     and arms the sticky marker (a reload may follow). «Esporta downloader…»
  *     now shows an inline DROPDOWN (7 compiled platforms + py) instead of the
  *     typed prompt; confirmation via pkgOsExportGo().
+ *     v1.9.3 ZERO-FLICKER NEUTRALIZATION: v1.9.2's deferred re-assert still
+ *     let the core's go(1) body SHOW panel p1 for one frame before hiding it
+ *     again — every event flood (serverstats, agent state, ...) flickered
+ *     the page while a plugin view was open. Root insight: go() checks
+ *     `if (xxcurrentView == x) return;` AFTER the goPageStart hook, so the
+ *     hook now sets xxcurrentView = x for SPONTANEOUS go()s (event == null,
+ *     x !== 0, plugin view active) and the core's body becomes a no-op —
+ *     no panel is ever shown or hidden. gotoStartViewPage then short-
+ *     circuits on its own (xxcurrentView != -1). User navigation (event)
+ *     tears down as before, restoring xxcurrentView = -1 first so the same
+ *     core body really shows the requested panel (no blank main area).
  *     v1.9.0 COMPILED PER-PLATFORM DOWNLOADER: like the meshagents, the
  *     downloader ships COMPILED, one binary per OS — plugins/pkgmanager/
  *     bin/meshos-downloader-<platform> (win-x64, win-x86, linux-x64,
@@ -177,7 +188,7 @@ module.exports.pkgmanager = function (parent) {
     var zlib = require('zlib');
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.2';
+    obj.version = '1.9.3';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -334,37 +345,28 @@ module.exports.pkgmanager = function (parent) {
                 try { sessionStorage.setItem('pkgmanagerStickyView', String(curV)); } catch (e2) { }
                 console.log('pkgmanager: sticky view armata per il bounce: ' + String(curV));
             }
-            // v1.9.2: un go() SENZA evento e' navigazione SPONTANEA del core
-            // (gotoStartViewPage dopo ogni flood di eventi — es. durante una
-            // scansione — o la riatterrata della websocket). gotoStartViewPage
-            // scatta proprio perche' le viste plugin usano xxcurrentView == -1,
-            // che per il core significa "nessuna vista": NON e' una scelta
-            // dell'utente (ogni click reale passa `event`), quindi non smontare
-            // la vista: lasciare completare il go() del core e riasserire
-            // subito la vista plugin (mapping identico allo sticky restore).
+            // v1.9.3: un go() SENZA evento e' navigazione SPONTANEA del core
+            // (gotoStartViewPage dopo ogni flood di eventi — scansione,
+            // serverstats, stato agenti — o la riatterrata della websocket):
+            // gotoStartViewPage scatta proprio perche' le viste plugin usano
+            // xxcurrentView == -1, che per il core significa "nessuna vista".
+            // NON e' una scelta dell'utente (ogni click reale passa `event`).
+            // v1.9.2 la riasseriva DOPO il go() — ma il corpo di go() mostra
+            // p1 per un frame prima: flicker a ogni flood. Il corpo di go()
+            // pero' esce subito con "if (xxcurrentView == x) return" — quindi
+            // qui impostiamo xxcurrentView = x: il corpo diventa un NO-OP,
+            // nessun pannello viene mostrato o nascosto. ZERO flicker; e dal
+            // flood dopo, gotoStartViewPage esce da solo (xx != -1).
             if ((event == null) && (x !== 0) && (curV != null)) {
-                setTimeout(function () {
-                    try {
-                        if (String(window.pkgmanagerView) !== String(curV)) return; // una navigazione vera e' intervenuta
-                        // gia' ripristinata da un reassert precedente (o go no-op): non rifare nulla
-                        if ((typeof xxcurrentView === 'number') && (xxcurrentView === -1)) return;
-                        // REASSERT MINIMO: il contenuto del wrap non e' mai stato
-                        // toccato (il teardown lo nasconde solo) — niente render
-                        // niente richiesta catalogo (la risposta ri-scatenerebbe
-                        // gotoStartViewPage: ping-pong ~6 go/s). Solo: nascondi il
-                        // pannello core che go(x) ha appena mostrato, ri-mostra il
-                        // wrap, rimetti xxcurrentView = -1 e lo stato delle tab.
-                        var xv = (typeof xxcurrentView === 'number') ? xxcurrentView : 1;
-                        if ((xv >= 0) && (xv <= 60)) { try { QV('p' + xv, false); } catch (e4) { } }
-                        var w = document.getElementById('pkgmanagerMainWrap');
-                        if (w != null) w.style.display = '';
-                        xxcurrentView = -1;
-                        pluginHandler.pkgmanager.pkgTabSetActive(curV);
-                        console.log('pkgmanager: vista mantenuta su go(' + String(x) + ') spontaneo: ' + curV);
-                    } catch (e3) { }
-                }, 0);
+                if ((typeof x === 'number') && (typeof xxcurrentView === 'number') && (xxcurrentView !== x)) { xxcurrentView = x; }
+                console.log('pkgmanager: go(' + String(x) + ') spontaneo neutralizzato: vista ' + curV + ' resta');
                 return;
             }
+            // navigazione UTENTE (event != null) o go(0): teardown come prima.
+            // Riprimo xxcurrentView a -1 SOLO se era stato neutralizzato (>= 0):
+            // cosi' il corpo di go(x) non fa l'early-return e mostra davvero il
+            // pannello richiesto (niente area principale vuota).
+            if ((curV != null) && (typeof xxcurrentView === 'number') && (xxcurrentView >= 0)) { xxcurrentView = -1; }
             window.pkgmanagerView = null;
             pluginHandler.pkgmanager.pkgTabSetActive(null, ((typeof x == 'number') && (x >= 9) && (x < 20)));
             var w = document.getElementById('pkgmanagerMainWrap');
