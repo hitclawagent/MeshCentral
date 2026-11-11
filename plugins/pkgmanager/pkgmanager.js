@@ -232,7 +232,7 @@ module.exports.pkgmanager = function (parent) {
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var vmMod = null; try { vmMod = require('vm'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.11';
+    obj.version = '1.9.12';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -444,6 +444,21 @@ module.exports.pkgmanager = function (parent) {
             var sbs = [sb1, sb2];
             for (var s = 0; s < sbs.length; s++) {
                 if (sbs[s] != null) { sbs[s].classList.remove('lbbuttonsel'); sbs[s].classList.remove('lbbuttonsel2'); }
+            }
+            // v1.9.12: apertura di una vista plugin -> pulisce ANCHE la
+            // selezione delle voci core (menu sinistro + barra top), altrimenti
+            // l'ultima pagina default visitata resta evidenziata accanto al
+            // trattino del plugin (il core pulisce le sue classi solo dentro
+            // go(), che il click sulla voce plugin non attraversa).
+            if (which != null) {
+                var coreLeft = ['LeftMenuMyDevices', 'LeftMenuMyAccount', 'LeftMenuMyEvents', 'LeftMenuMyFiles', 'LeftMenuMyUsers', 'LeftMenuMyServer'];
+                var coreTop = ['MainMenuMyDevices', 'MainMenuMyAccount', 'MainMenuMyEvents', 'MainMenuMyFiles', 'MainMenuMyUsers', 'MainMenuMyServer'];
+                for (var c4 = 0; c4 < coreLeft.length; c4++) {
+                    var el = document.getElementById(coreLeft[c4]);
+                    if (el != null) { el.classList.remove('lbbuttonsel'); el.classList.remove('lbbuttonsel2'); }
+                    var el2 = document.getElementById(coreTop[c4]);
+                    if (el2 != null) { el2.classList.remove('fullselect'); el2.classList.remove('semiselect'); }
+                }
             }
             if (which != null) {
                 var a = { install: t1, admin: t2, create: t3, os: o1, osadmin: o2 }[which];
