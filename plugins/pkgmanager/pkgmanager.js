@@ -232,7 +232,7 @@ module.exports.pkgmanager = function (parent) {
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var vmMod = null; try { vmMod = require('vm'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.14';
+    obj.version = '1.9.15';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -355,7 +355,7 @@ module.exports.pkgmanager = function (parent) {
             // v1.9.14: icona SVG «due frecce che si rincorrono» (archi spessi
             // e verdi, stile sync) al posto dell'emoji — resa identica su
             // tutte le piattaforme e colore controllato.
-            b2.innerHTML = '<div style="position:absolute;top:4px;left:0;width:100%;text-align:center">'
+            b2.innerHTML = '<div style="position:absolute;top:10px;left:0;width:100%;text-align:center">'
                 + '<svg width="54" height="54" viewBox="0 0 24 24" fill="none" stroke="#34a853" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
                 + '<polyline points="23 4 23 10 17 10"></polyline>'
                 + '<polyline points="1 20 1 14 7 14"></polyline>'
