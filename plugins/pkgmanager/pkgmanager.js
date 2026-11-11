@@ -232,7 +232,7 @@ module.exports.pkgmanager = function (parent) {
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var vmMod = null; try { vmMod = require('vm'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.12';
+    obj.version = '1.9.13';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -313,7 +313,7 @@ module.exports.pkgmanager = function (parent) {
     setTimeout(function () { try { obj.ensureBinaries(); } catch (e) { console.log('pkgmanager[server]: ensureBinaries errore: ' + e); } }, 15000);
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgDevOsFilter', 'pkgDevListRender', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgOsExportGo', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgAdminOsFilter', 'pkgBinBanner', 'pkgUpdateOnline', 'pkgUpdateFile', 'pkgUpdateUpload', 'pkgUpdateInfo', 'pkgUpdateApplied', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgDevOsFilter', 'pkgDevListRender', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgOsExportGo', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgAdminOsFilter', 'pkgBinBanner', 'pkgOsPluginOpen', 'pkgOsPluginRender', 'pkgUpdateOnline', 'pkgUpdateFile', 'pkgUpdateUpload', 'pkgUpdateInfo', 'pkgUpdateApplied', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -349,10 +349,10 @@ module.exports.pkgmanager = function (parent) {
             var b2 = document.createElement('div');
             b2.id = 'LeftMenuOsUpdates';
             b2.className = 'lbbutton';
-            b2.title = 'Aggiornamenti del sistema operativo (airgap)';
+            b2.title = 'Aggiornamenti e gestione del sistema operativo (airgap)';
             b2.setAttribute('tabindex', '0');
             b2.setAttribute('onmouseup', 'pluginHandler.pkgmanager.pkgOsSidebarOpen()');
-            b2.innerHTML = '<div style="position:absolute;top:8px;left:0;width:100%;text-align:center;font-size:46px;line-height:58px">🛡️</div>';
+            b2.innerHTML = '<div style="position:absolute;top:8px;left:0;width:100%;text-align:center;font-size:46px;line-height:58px">🔄</div>';
             lb.appendChild(b2);
             var col = document.getElementById('column_l');
             if (col == null) return;
@@ -390,7 +390,8 @@ module.exports.pkgmanager = function (parent) {
                 span2.style.width = '100%';
                 span2.innerHTML = '<table id="osmanagerMenuTable" cellpadding=0 cellspacing=0 class="style1" style="width:100%"><tr>'
                     + '<td tabindex=0 id="MainTabOsUpdates" class="topbar_td style3x" style="padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgOsSidebarOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgOsSidebarOpen()">Aggiornamenti OS</td>'
-                    + '<td tabindex=0 id="MainTabOsMgmt" class="topbar_td style3x" style="display:none;padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgOsAdminOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgOsAdminOpen()">Gestione aggiornamenti</td>'
+                    + '<td tabindex=0 id="MainTabOsMgmt" class="topbar_td style3x" style="display:none;padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgOsAdminOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgOsAdminOpen()">Gestione aggiornamenti OS</td>'
+                    + '<td tabindex=0 id="MainTabOsPlugin" class="topbar_td style3x" style="display:none;padding-left:16px;padding-right:16px" onmouseup="pluginHandler.pkgmanager.pkgOsPluginOpen()" onkeypress="if (event.key == \'Enter\') pluginHandler.pkgmanager.pkgOsPluginOpen()">Aggiorna plugin</td>'
                     + '<td class="topbar_td_end style3">&nbsp;</td>'
                     + '</tr></table>';
                 sub.parentNode.insertBefore(span, sub.nextSibling);
@@ -423,16 +424,18 @@ module.exports.pkgmanager = function (parent) {
             var t3 = document.getElementById('MainTabPkgCreate');
             var o1 = document.getElementById('MainTabOsUpdates');
             var o2 = document.getElementById('MainTabOsMgmt');
+            var o3 = document.getElementById('MainTabOsPlugin');
             var adm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
             if (t2 != null) { t2.style.display = adm ? '' : 'none'; }
             if (t3 != null) { t3.style.display = adm ? '' : 'none'; }
             if (o2 != null) { o2.style.display = adm ? '' : 'none'; }
+            if (o3 != null) { o3.style.display = adm ? '' : 'none'; }
             // v1.5.0: each sidebar menu shows ONLY its own gray bar (v1.4.1
             // rule kept: both hide on every core page; goPageStart -> which null).
-            var osBar = ((which == 'os') || (which == 'osadmin'));
+            var osBar = ((which == 'os') || (which == 'osadmin') || (which == 'osplugin'));
             if (spanA != null) { spanA.style.display = ((which != null) && (!osBar) && (hideRow !== true)) ? '' : 'none'; }
             if (spanB != null) { spanB.style.display = ((osBar) && (hideRow !== true)) ? '' : 'none'; }
-            var ts = [t1, t2, t3, o1, o2];
+            var ts = [t1, t2, t3, o1, o2, o3];
             for (var i = 0; i < ts.length; i++) { if (ts[i] != null) { ts[i].classList.remove('fullselect'); } }
             // v1.9.11: indicatore di voce attiva nel menu laterale (le voci
             // core usano lbbuttonsel2 — il bottone si allarga e tocca la
@@ -461,7 +464,7 @@ module.exports.pkgmanager = function (parent) {
                 }
             }
             if (which != null) {
-                var a = { install: t1, admin: t2, create: t3, os: o1, osadmin: o2 }[which];
+                var a = { install: t1, admin: t2, create: t3, os: o1, osadmin: o2, osplugin: o3 }[which];
                 if (a != null) { a.classList.add('fullselect'); }
                 var sbSel = (osBar) ? sb2 : sb1;
                 if (sbSel != null) { sbSel.classList.add('lbbuttonsel2'); }
@@ -548,6 +551,47 @@ module.exports.pkgmanager = function (parent) {
     // ---- v1.5.0: OS-side admin/create views (opened from the OS gray bar) ----
     obj.pkgIsOsView = function () {
         return ((window.pkgmanagerView == 'os') || (window.pkgmanagerView == 'osadmin'));
+    };
+
+    // v1.9.13: scheda «Aggiorna plugin» — i due tasti di aggiornamento
+    // (online e file airgap) con la sintesi della versione corrente.
+    obj.pkgOsPluginOpen = function () {
+        try {
+            var w = document.getElementById('pkgmanagerMainWrap');
+            if (w == null) return;
+            try {
+                if ((typeof xxcurrentView == 'number') && (xxcurrentView >= 0) && (xxcurrentView <= 60)) { QV('p' + xxcurrentView, false); }
+                xxcurrentView = -1;
+            } catch (e) { }
+            w.style.display = '';
+            window.pkgmanagerView = 'osplugin';
+            window.pkgmanagerAdminMsg = '';
+            pluginHandler.pkgmanager.pkgTabSetActive('osplugin');
+            var b = document.getElementById('LeftMenuPackages');
+            if (b != null) b.style.opacity = '';
+            var bo = document.getElementById('LeftMenuOsUpdates');
+            if (bo != null) bo.style.opacity = '1';
+            pluginHandler.pkgmanager.pkgOsPluginRender();
+        } catch (e) { console.log('pkgmanager osplugin open failed: ' + e); }
+    };
+
+    obj.pkgOsPluginRender = function () {
+        try {
+            var m = document.getElementById('pkgmanagerMain');
+            if (m == null) return;
+            var adm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
+            var ver = ((window.pkgmanagerPluginVersion != null) ? String(window.pkgmanagerPluginVersion) : null);
+            var x = '<div style="margin-bottom:8px;font-size:16px"><b>Aggiorna plugin</b></div>' + pluginHandler.pkgmanager.pkgBinBanner();
+            x += '<div style="margin-bottom:10px">Versione corrente del plugin: <b style="font-size:15px">v' + EscapeHtml((ver != null) ? ver : '?') + '</b>' + ((ver == null) ? ' <span style="color:#888">(si aggiorna al primo caricamento del catalogo)</span>' : '') + '</div>';
+            if (adm) {
+                x += '<div style="margin-bottom:10px"><input type=button value="Aggiorna plugin (online)" title="Il SERVER scarica la nuova versione del plugin dal sorgente configurato, la verifica (sha384) e la installa con backup: serve il riavvio di MeshCentral per attivarla" onclick="pluginHandler.pkgmanager.pkgUpdateOnline()"> <input type=button value="Aggiorna plugin (file)" title="VIA AIRGAP: carica il pkgmanager.js nuovo da un file locale; il server lo verifica (JavaScript valido, versione, sha384), fa il backup e lo installa — serve il riavvio di MeshCentral per attivarla" onclick="pluginHandler.pkgmanager.pkgUpdateFile()"></div>';
+            } else {
+                x += '<div style="color:#888">La gestione degli aggiornamenti del plugin è riservata agli amministratori completi del server.</div>';
+            }
+            x += '<div id="pkgmanagerMsg" style="margin-top:10px;color:#888"></div>';
+            x += '<div style="margin-top:14px;color:#888;font-size:12px">Canali di aggiornamento: <b>online</b> (il server scarica dal sorgente configurato in config.json) oppure <b>file</b> (airgap: carichi il pkgmanager.js nuovo da qui). In alternativa la scheda «Plugins» di My Server gestisce l\'upgrade dallo zip dichiarato in downloadUrl.</div>';
+            m.innerHTML = x;
+        } catch (e) { console.log('pkgmanager osplugin render failed: ' + e); }
     };
 
     obj.pkgOsAdminOpen = function () {
@@ -950,12 +994,12 @@ module.exports.pkgmanager = function (parent) {
             var cat = window.pkgmanagerCatalog;
             if ((cat == null) || (cat.packages == null)) { m.innerHTML = '<div style="color:#888">Caricamento catalogo…</div>'; return; }
             var isOs = pluginHandler.pkgmanager.pkgIsOsView();
-            var x = '<div style="margin-bottom:8px;font-size:16px"><b>' + (isOs ? 'Gestione aggiornamenti' : 'Gestione pacchetti') + '</b> — ' + (isOs ? 'bundle OS airgap' : 'catalogo e artefatti airgap') + '</div>' + pluginHandler.pkgmanager.pkgBinBanner();
+            var x = '<div style="margin-bottom:8px;font-size:16px"><b>' + (isOs ? 'Gestione aggiornamenti OS' : 'Gestione pacchetti') + '</b> — ' + (isOs ? 'bundle OS airgap' : 'catalogo e artefatti airgap') + '</div>' + pluginHandler.pkgmanager.pkgBinBanner();
             // v1.9.5: filtro OS del catalogo (solo «Gestione pacchetti», non per i bundle OS)
             if (!isOs) { x += '<div style="margin-bottom:8px">Sistema operativo: <select id="pkgmanagerAdminOsSel" onchange="pluginHandler.pkgmanager.pkgAdminOsFilter()" style="padding:3px 5px"><option value="all">Tutti</option><option value="linux">Linux</option><option value="windows">Windows</option><option value="macos">macOS</option></select> <span id="pkgmanagerAdminOsCount" style="color:#888;font-size:12px"></span></div>'; }
-            var updAdm = ((typeof userinfo != 'undefined') && (userinfo != null) && (userinfo.siteadmin === 0xFFFFFFFF));
-            var updBtns = (updAdm ? '<input type=button value="Aggiorna plugin (online)" title="Il SERVER scarica la nuova versione del plugin dal sorgente configurato, la verifica (sha384) e la installa con backup: serve il riavvio di MeshCentral per attivarla" onclick="pluginHandler.pkgmanager.pkgUpdateOnline()"> <input type=button value="Aggiorna plugin (file)" title="VIA AIRGAP: carica il pkgmanager.js nuovo da un file locale; il server lo verifica (JavaScript valido, versione, sha384), fa il backup e lo installa — serve il riavvio di MeshCentral per attivarla" onclick="pluginHandler.pkgmanager.pkgUpdateFile()"> ' : '');
-            x += '<div style="margin-bottom:8px">' + (isOs ? '' : '<input type=button value="Aggiungi pacchetto" onclick="pluginHandler.pkgmanager.pkgAdminAdd()"> ') + '<input type=button value="Ricarica catalogo" onclick="pluginHandler.pkgmanager.pkgAdminRefresh()"> ' + (isOs ? '<input type=button value="Importa manifest…" title="Importa un manifest.json generato da meshos-fetch (i file devono essere gia stati copiati nello store del server)" onclick="pluginHandler.pkgmanager.pkgOsImportManifest()">' : '') + updBtns + '</div>';
+            // v1.9.13: i tasti «Aggiorna plugin» sono spostati nella scheda
+            // «Aggiorna plugin» del menu Aggiornamenti OS (pkgOsPluginRender).
+            x += '<div style="margin-bottom:8px">' + (isOs ? '' : '<input type=button value="Aggiungi pacchetto" onclick="pluginHandler.pkgmanager.pkgAdminAdd()"> ') + '<input type=button value="Ricarica catalogo" onclick="pluginHandler.pkgmanager.pkgAdminRefresh()"> ' + (isOs ? '<input type=button value="Importa manifest…" title="Importa un manifest.json generato da meshos-fetch (i file devono essere gia stati copiati nello store del server)" onclick="pluginHandler.pkgmanager.pkgOsImportManifest()">' : '') + '</div>';
             if ((window.pkgmanagerAdminMsg != null) && (window.pkgmanagerAdminMsg != '')) { x += '<div style="margin-bottom:8px;color:#080">' + EscapeHtml(window.pkgmanagerAdminMsg) + '</div>'; }
             x += '<table style="border-collapse:collapse;width:100%">';
             x += '<tr style="text-align:left;border-bottom:1px solid #ccc"><th style="padding:4px">Pacchetto</th><th style="padding:4px">Definizioni OS / artefatto</th><th style="padding:4px">Azioni</th></tr>';
@@ -1456,6 +1500,7 @@ module.exports.pkgmanager = function (parent) {
             window.pkgmanagerBinMissing = message.binMissing;
             window.pkgmanagerBinBusy = message.binBusy;
             window.pkgmanagerBinAttempts = message.binAttempts;
+            if (message.pluginVersion != null) { window.pkgmanagerPluginVersion = message.pluginVersion; }
             if (message.opAck != null) { window.pkgmanagerAdminMsg = message.opAck; }
             if (message.error != null) { window.pkgmanagerAdminMsg = message.error; pluginHandler.pkgmanager.pkgMsg(message.error); } // v1.8.0: gli errori del server (es. osfetch su server airgap) ora sono VISIBILI
             // v1.9.1 sticky view: dopo un bounce (go(0) ha salvato la vista)
@@ -1471,6 +1516,7 @@ module.exports.pkgmanager = function (parent) {
                     else if (stickyV === 'os') { pluginHandler.pkgmanager.pkgOsSidebarOpen(); }
                     else if (stickyV === 'admin') { pluginHandler.pkgmanager.pkgAdminOpen(); }
                     else if (stickyV === 'osadmin') { pluginHandler.pkgmanager.pkgOsAdminOpen(); }
+                    else if (stickyV === 'osplugin') { pluginHandler.pkgmanager.pkgOsPluginOpen(); }
                     else if (stickyV === 'create') { pluginHandler.pkgmanager.pkgCreateOpen(); }
                     console.log('pkgmanager: sticky view ripristinata dopo il bounce: ' + stickyV);
                 } catch (e3) { }
@@ -1492,6 +1538,7 @@ module.exports.pkgmanager = function (parent) {
                 }
             }
             if ((window.pkgmanagerView == 'admin') || (window.pkgmanagerView == 'osadmin')) { pluginHandler.pkgmanager.pkgAdminRender(); }
+            else if (window.pkgmanagerView == 'osplugin') { pluginHandler.pkgmanager.pkgOsPluginRender(); }
             else if (window.pkgmanagerView == 'create') { pluginHandler.pkgmanager.pkgCreateCatalogArrived(); }
             else if (window.pkgmanagerView == 'os') { if (document.getElementById('pkgmanagerTableWrap') != null) { pluginHandler.pkgmanager.pkgOsTable(); } else { pluginHandler.pkgmanager.pkgOsRender(); } if (message.opAck != null) { pluginHandler.pkgmanager.pkgMsg(message.opAck); } }
             else { pluginHandler.pkgmanager.pkgSidebarRender(); }
@@ -2329,7 +2376,7 @@ module.exports.pkgmanager = function (parent) {
             // pluginHandler[message.plugin][message.method](server, message):
             // plugin and method must be at the TOP level, not nested in event.
             var send = function () {
-                try { session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgList', catalog: cat, token: obj.dlToken, opAck: opAck, error: (err2 ? String(err2) : (err || null)), binMissing: ((obj.binariesMissing != null) ? obj.binariesMissing().length : -1), binBusy: (obj.ensureBinariesBusy === true), binAttempts: (obj.ensureBinariesAttempts || 0) }); } catch (e) { console.log('pkgmanager: reply failed: ' + e); }
+                try { session.send({ action: 'plugin', plugin: 'pkgmanager', method: 'pkgList', catalog: cat, token: obj.dlToken, opAck: opAck, error: (err2 ? String(err2) : (err || null)), binMissing: ((obj.binariesMissing != null) ? obj.binariesMissing().length : -1), binBusy: (obj.ensureBinariesBusy === true), binAttempts: (obj.ensureBinariesAttempts || 0), pluginVersion: obj.version }); } catch (e) { console.log('pkgmanager: reply failed: ' + e); }
             };
             if ((cat == null) || (cat.packages == null)) { send(); return; }
             var oses = ['linux', 'windows', 'macos'];
