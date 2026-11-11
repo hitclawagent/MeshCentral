@@ -232,7 +232,7 @@ module.exports.pkgmanager = function (parent) {
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var vmMod = null; try { vmMod = require('vm'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.10';
+    obj.version = '1.9.11';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -434,9 +434,22 @@ module.exports.pkgmanager = function (parent) {
             if (spanB != null) { spanB.style.display = ((osBar) && (hideRow !== true)) ? '' : 'none'; }
             var ts = [t1, t2, t3, o1, o2];
             for (var i = 0; i < ts.length; i++) { if (ts[i] != null) { ts[i].classList.remove('fullselect'); } }
+            // v1.9.11: indicatore di voce attiva nel menu laterale (le voci
+            // core usano lbbuttonsel2 — il bottone si allarga e tocca la
+            // pagina). pkgTabSetActive e' chiamato sia all'apertura delle
+            // viste plugin sia da goPageStart(null) al ritorno su una pagina
+            // core, quindi qui la classe viene aggiunta E rimossa.
+            var sb1 = document.getElementById('LeftMenuPackages');
+            var sb2 = document.getElementById('LeftMenuOsUpdates');
+            var sbs = [sb1, sb2];
+            for (var s = 0; s < sbs.length; s++) {
+                if (sbs[s] != null) { sbs[s].classList.remove('lbbuttonsel'); sbs[s].classList.remove('lbbuttonsel2'); }
+            }
             if (which != null) {
                 var a = { install: t1, admin: t2, create: t3, os: o1, osadmin: o2 }[which];
                 if (a != null) { a.classList.add('fullselect'); }
+                var sbSel = (osBar) ? sb2 : sb1;
+                if (sbSel != null) { sbSel.classList.add('lbbuttonsel2'); }
                 try { QC('column_l').add('room4submenu'); } catch (e) { }
             } else {
                 try { QC('column_l').remove('room4submenu'); } catch (e) { }
