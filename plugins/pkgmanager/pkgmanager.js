@@ -232,7 +232,7 @@ module.exports.pkgmanager = function (parent) {
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var vmMod = null; try { vmMod = require('vm'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.13';
+    obj.version = '1.9.14';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -352,7 +352,15 @@ module.exports.pkgmanager = function (parent) {
             b2.title = 'Aggiornamenti e gestione del sistema operativo (airgap)';
             b2.setAttribute('tabindex', '0');
             b2.setAttribute('onmouseup', 'pluginHandler.pkgmanager.pkgOsSidebarOpen()');
-            b2.innerHTML = '<div style="position:absolute;top:8px;left:0;width:100%;text-align:center;font-size:46px;line-height:58px">🔄</div>';
+            // v1.9.14: icona SVG «due frecce che si rincorrono» (archi spessi
+            // e verdi, stile sync) al posto dell'emoji — resa identica su
+            // tutte le piattaforme e colore controllato.
+            b2.innerHTML = '<div style="position:absolute;top:4px;left:0;width:100%;text-align:center">'
+                + '<svg width="54" height="54" viewBox="0 0 24 24" fill="none" stroke="#34a853" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+                + '<polyline points="23 4 23 10 17 10"></polyline>'
+                + '<polyline points="1 20 1 14 7 14"></polyline>'
+                + '<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>'
+                + '</svg></div>';
             lb.appendChild(b2);
             var col = document.getElementById('column_l');
             if (col == null) return;
@@ -712,7 +720,7 @@ module.exports.pkgmanager = function (parent) {
             x += '<tr><td style="padding:4px">ID</td><td style="padding:4px"><input type=text id=pkgfId style=width:280px oninput="pluginHandler.pkgmanager.pkgCreateCheckId();pluginHandler.pkgmanager.pkgCreateDraftSync()"> <span id=pkgfIdHint style="color:#888"></span></td></tr>';
             x += '<tr><td style="padding:4px">Nome</td><td style="padding:4px"><input type=text id=pkgfName style=width:280px oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></td></tr>';
             x += '<tr><td style="padding:4px">Descrizione</td><td style="padding:4px"><input type=text id=pkgfDesc style=width:420px oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></td></tr>';
-            x += '<tr><td style="padding:4px">Categoria</td><td style="padding:4px"><select id=pkgfKind style=width:280px onchange="pluginHandler.pkgmanager.pkgCreateDraftSync()"><option value="">Applicazione (gestione pacchetti)</option></select> <span style="color:#888;font-size:12px">gli aggiornamenti OS non si creano a mano: nascono dalla scansione con «Scarica aggiornamenti» (voce 🛡️ «Aggiornamenti OS»)</span></td></tr>';
+            x += '<tr><td style="padding:4px">Categoria</td><td style="padding:4px"><select id=pkgfKind style=width:280px onchange="pluginHandler.pkgmanager.pkgCreateDraftSync()"><option value="">Applicazione (gestione pacchetti)</option></select> <span style="color:#888;font-size:12px">gli aggiornamenti OS non si creano a mano: nascono dalla scansione con «Scarica aggiornamenti» (voce «Aggiornamenti OS»)</span></td></tr>';
             x += '<tr><td style="padding:4px">Sistema operativo</td><td style="padding:4px"><select id=pkgfOs onchange="pluginHandler.pkgmanager.pkgCreateOsChange()"><option value=linux selected>Linux</option><option value=windows>Windows</option><option value=macos>macOS</option></select> <span id=pkgfOsHint style="color:#888"></span></td></tr>';
             x += '<tr><td style="padding:4px">Artefatto (file nello store)</td><td style="padding:4px"><input type=text id=pkgfArt style=width:280px oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"> <input type=button value="Carica artefatto…" onclick="pluginHandler.pkgmanager.pkgCreateUpload()"> <input type=button value="Elimina artefatto" onclick="pluginHandler.pkgmanager.pkgCreateArtifactDel()"></td></tr>';
             x += '<tr><td style="padding:4px">Tipo comando</td><td style="padding:4px"><select id=pkgfType onchange="pluginHandler.pkgmanager.pkgCreateDraftSync()"><option value=3>Shell (Linux/macOS)</option><option value=1>cmd.exe (Windows)</option><option value=2>PowerShell (Windows)</option></select> · Timeout (s): <input type=text id=pkgfTo style=width:70px value=300 oninput="pluginHandler.pkgmanager.pkgCreateDraftSync()"></td></tr>';
@@ -1129,7 +1137,7 @@ module.exports.pkgmanager = function (parent) {
             x += '<tr><td style="padding:4px">ID</td><td style="padding:4px"><input type=text id=pkgfId style=width:280px value="' + EscapeHtml(isNew ? '' : pkg.id) + '"' + (isNew ? '' : ' readonly') + '></td></tr>';
             x += '<tr><td style="padding:4px">Nome</td><td style="padding:4px"><input type=text id=pkgfName style=width:280px value="' + EscapeHtml(isNew ? '' : (pkg.name || '')) + '"></td></tr>';
             x += '<tr><td style="padding:4px">Descrizione</td><td style="padding:4px"><input type=text id=pkgfDesc style=width:420px value="' + EscapeHtml(isNew ? '' : (pkg.description || '')) + '"></td></tr>';
-            x += '<tr><td style="padding:4px">Categoria</td><td style="padding:4px"><select id=pkgfKind style=width:280px onchange="pluginHandler.pkgmanager.pkgAdminDraftSync()"><option value="">Applicazione (gestione pacchetti)</option>' + osKindOpt + '</select> <span style="color:#888;font-size:12px">gli aggiornamenti OS compaiono solo nella voce 🛡️ «Aggiornamenti OS» e non si creano a mano (scansione → Scarica aggiornamenti)</span></td></tr>';
+            x += '<tr><td style="padding:4px">Categoria</td><td style="padding:4px"><select id=pkgfKind style=width:280px onchange="pluginHandler.pkgmanager.pkgAdminDraftSync()"><option value="">Applicazione (gestione pacchetti)</option>' + osKindOpt + '</select> <span style="color:#888;font-size:12px">gli aggiornamenti OS compaiono solo nel menu «Aggiornamenti OS» e non si creano a mano (scansione → Scarica aggiornamenti)</span></td></tr>';
             x += '</table>';
             // v0.9.1 single form: per-OS drafts seeded from the package, the OS
             // dropdown swaps the fields (same pattern as the builder).
