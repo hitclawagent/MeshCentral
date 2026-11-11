@@ -232,7 +232,7 @@ module.exports.pkgmanager = function (parent) {
     var childProcess = null; try { childProcess = require('child_process'); } catch (e) { }
     var vmMod = null; try { vmMod = require('vm'); } catch (e) { }
     var obj = {};
-    obj.version = '1.9.9';
+    obj.version = '1.9.10';
     obj.fs = parent.fs;
     obj.path = parent.path;
     obj.catalogPath = parent.path.join(parent.parent.datapath, 'plugins', 'pkgmanager', 'catalog.json');
@@ -313,7 +313,7 @@ module.exports.pkgmanager = function (parent) {
     setTimeout(function () { try { obj.ensureBinaries(); } catch (e) { console.log('pkgmanager[server]: ensureBinaries errore: ' + e); } }, 15000);
 
     // ---- Client-side (stringified into the browser) ----
-    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgDevOsFilter', 'pkgDevListRender', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgOsExportGo', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgAdminOsFilter', 'pkgUpdateOnline', 'pkgUpdateFile', 'pkgUpdateUpload', 'pkgUpdateInfo', 'pkgUpdateApplied', 'pkgDenied'];
+    obj.exports = ['onWebUIStartupEnd', 'pkgSidebarInject', 'pkgRequestList', 'pkgList', 'pkgCompose', 'pkgTableHtml', 'pkgTargetOs', 'pkgDevToggle', 'pkgDevSelectAll', 'pkgDevOsFilter', 'pkgDevListRender', 'pkgSelectedNodes', 'pkgSidebarOpen', 'pkgSidebarRenderDevices', 'pkgSidebarRender', 'pkgPkgToggle', 'pkgPkgSelectAll', 'pkgPkgSummary', 'pkgBatchRun', 'pkgOsScan', 'pkgOsImportManifest', 'pkgOsFetchUpdates', 'pkgOsExportDownloader', 'pkgOsExportGo', 'pkgDownloaderReady', 'pkgOsScanPoll', 'pkgOsScanParse', 'pkgOsScanRender', 'pkgOsScanExport', 'pkgOsSidebarOpen', 'pkgOsRender', 'pkgOsTable', 'pkgOsKind', 'pkgOsAdminOpen', 'pkgIsOsView', 'pkgInstall', 'pkgRunOn', 'goPageStart', 'pkgMsg', 'pkgTabSetActive', 'pkgAdminOpen', 'pkgAdminRender', 'pkgCreateOpen', 'pkgCreateRender', 'pkgCreateCurOs', 'pkgCreateDefaultType', 'pkgCreateFieldSync', 'pkgCreateDraftSync', 'pkgCreateOsChange', 'pkgCreateOsHint', 'pkgCreateUpload', 'pkgCreateArtifactDel', 'pkgCreatePreset', 'pkgCreateInsert', 'pkgCreateSave', 'pkgCreateCheckId', 'pkgCreateCatalogArrived', 'pkgAdminAdd', 'pkgAdminEdit', 'pkgAdminForm', 'pkgAdminCurOs', 'pkgAdminFieldSync', 'pkgAdminDraftSync', 'pkgAdminOsChange', 'pkgAdminOsHint', 'pkgAdminSave', 'pkgAdminDelete', 'pkgAdminUpload', 'pkgAdminUploadDo', 'pkgAdminArtifactDel', 'pkgAdminStatus', 'pkgAdminRefresh', 'pkgAdminOsFilter', 'pkgBinBanner', 'pkgUpdateOnline', 'pkgUpdateFile', 'pkgUpdateUpload', 'pkgUpdateInfo', 'pkgUpdateApplied', 'pkgDenied'];
 
     obj.onWebUIStartupEnd = function () {
         try {
@@ -784,6 +784,11 @@ module.exports.pkgmanager = function (parent) {
                 var d2 = pkg[osesChk[c2]];
                 if ((d2 != null) && (d2.uninstall == null) && (String(d2.kind || '') != 'os')) { pluginHandler.pkgmanager.pkgAdminStatus('Comando di disinstallazione mancante per ' + osesChk[c2] + ' — generane uno col preset o scrivilo a mano (è obbligatorio come l\'installazione).'); return; }
             }
+            // v1.9.10: al catalogo che conferma il salvataggio il wizard si
+            // azzera (campi + draft) — pronto per un pacchetto nuovo senza
+            // ritrovarsi l'ID gia esistente. Se il server risponde con errore
+            // i campi restano compilati.
+            window.pkgmanagerCreateSaved = pid;
             meshserver.send({ action: 'plugin', plugin: 'pkgmanager', pluginaction: 'save', pkg: pkg });
             pluginHandler.pkgmanager.pkgAdminStatus('Salvataggio…');
             pluginHandler.pkgmanager.pkgCreateOsHint();
@@ -885,10 +890,25 @@ module.exports.pkgmanager = function (parent) {
     // never re-render the form (a half-filled form must not be wiped).
     obj.pkgCreateCatalogArrived = function () {
         try {
-            if ((window.pkgmanagerAdminMsg != null) && (window.pkgmanagerAdminMsg != '')) {
+            var msg = window.pkgmanagerAdminMsg;
+            window.pkgmanagerAdminMsg = '';
+            // v1.9.10: salvataggio riuscito -> wizard azzerato (campi vuoti,
+            // nessun «ID gia esistente» al pacchetto successivo). Errore ->
+            // i campi restano come li ha lasciati l'utente.
+            if ((window.pkgmanagerCreateSaved != null) && (msg != null) && (msg.indexOf('Pacchetto salvato:') == 0)) {
+                window.pkgmanagerCreateSaved = null;
+                window.pkgmanagerDraft = {};
+                window.pkgmanagerDraftBase = null;
+                window.pkgmanagerDraftOs = null;
+                pluginHandler.pkgmanager.pkgCreateRender();
+                var st2 = document.getElementById('pkgadminStatus');
+                if (st2 != null) { st2.innerText = msg + ' — campi azzerati, pronto per un nuovo pacchetto.'; st2.style.color = '#080'; }
+                return;
+            }
+            window.pkgmanagerCreateSaved = null;
+            if ((msg != null) && (msg != '')) {
                 var st = document.getElementById('pkgadminStatus');
-                if (st != null) { st.innerText = window.pkgmanagerAdminMsg; st.style.color = '#080'; }
-                window.pkgmanagerAdminMsg = '';
+                if (st != null) { st.innerText = msg; st.style.color = '#080'; }
             }
             pluginHandler.pkgmanager.pkgCreateCheckId();
             pluginHandler.pkgmanager.pkgCreateOsHint();
